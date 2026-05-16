@@ -5,39 +5,114 @@ import Footer from '@/components/Footer'
 import { useState, useEffect } from 'react'
 import { Trophy, Medal, Crown, TrendingUp, Calendar, Users, Eye } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { getUsers, getMatches, getAllPredictions } from '@/app/actions'
 
-// Mock data for ranking
-const mockRanking = [
-  { rank: 1, username: 'admin', points: 156, predictions: 48, lastMatch: 'Argentina 2-1 Brasil' },
-  { rank: 2, username: 'Juanito', points: 142, predictions: 48, lastMatch: 'España 1-1 Francia' },
-  { rank: 3, username: 'Maria92', points: 138, predictions: 47, lastMatch: 'Alemania 3-2 Italia' },
-  { rank: 4, username: 'Carlos_88', points: 125, predictions: 48, lastMatch: 'Inglaterra 2-0 Portugal' },
-  { rank: 5, username: 'Elena_M', points: 118, predictions: 46, lastMatch: 'México 1-2 EE.UU.' },
-  { rank: 6, username: 'Pedro_Futbol', points: 112, predictions: 48, lastMatch: 'Uruguay 2-1 Chile' },
-  { rank: 7, username: 'Ana123', points: 108, predictions: 45, lastMatch: 'Argentina 2-1 Brasil' },
-  { rank: 8, username: 'Miguel_Tips', points: 102, predictions: 48, lastMatch: 'España 2-0 Francia' },
-  { rank: 9, username: 'Sofia_Wins', points: 98, predictions: 44, lastMatch: 'Alemania 1-0 Italia' },
-  { rank: 10, username: 'Diego_Porra', points: 95, predictions: 48, lastMatch: 'Inglaterra 1-1 Portugal' },
-]
+interface RankingUser {
+  username: string
+  points: number
+  predictions_count: number
+  is_admin: boolean
+}
+
+interface Match {
+  id: string
+  home_team: string
+  away_team: string
+  home_score?: number
+  away_score?: number
+  phase: string
+}
+
+interface Prediction {
+  user_id: string
+  match_id: string
+  home_score: number
+  away_score: number
+  points?: number
+  matches?: Match
+}
 
 export default function RankingPage() {
   const [sortBy, setSortBy] = useState<'points' | 'predictions'>('points')
   const [mounted, setMounted] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
+  const [users, setUsers] = useState<RankingUser[]>([])
+  const [predictions, setPredictions] = useState<Prediction[]>([])
+  const [matches, setMatches] = useState<Match[]>([])
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
     setMounted(true)
     const token = localStorage.getItem('auth_token')
     setIsLoggedIn(!!token)
+    loadData()
   }, [])
 
-  if (!mounted) return null
+  const loadData = async () => {
+    try {
+      const [usersData, predictionsData, matchesData] = await Promise.all([
+        getUsers(),
+        getAllPredictions(),
+        getMatches()
+      ])
 
-  const sortedRanking = [...mockRanking].sort((a, b) =>
+      setUsers(usersData || [])
+      setPredictions(predictionsData || [])
+      setMatches(matchesData || [])
+    } catch (err) {
+      console.error('Error cargando ranking:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!mounted || loading) {
+    return (
+      <div className="flex flex-col min-h-screen bg-background items-center justify-center">
+        <div className="animate-spin h-10 w-10 border-4 border-primary border-t-transparent rounded-full"></div>
+        <p className="mt-4 text-text-secondary">Cargando ranking...</p>
+      </div>
+    )
+  }
+
+  // Calcular estadísticas por usuario
+  const userStats = users.map((user, index) => {
+    const userPredictions = predictions.filter(p => p.user_id === user.username)
+    const correctPredictions = userPredictions.filter(p => (p.points || 0) > 0).length
+    
+    // Encontrar último partido con predicción
+    const lastPred = userPredictions
+      .filter(p => p.matches)
+      .sort((a, b) => new Date(b.matches?.home_team || '').getTime() - new Date(a.matches?.home_team || '').getTime())[0]
+    
+    const lastMatch = lastPred?.matches 
+      ? `${lastPred.matches.home_team} ${lastPred.home_score}-${lastPred.away_score} ${lastPred.matches.away_team}`
+      : 'Sin predicciones'
+
+    return {
+      rank: index + 1,
+      username: user.username,
+      points: user.points || 0,
+      predictions: userPredictions.length,
+      correctPredictions,
+      lastMatch,
+      isAdmin: user.is_admin
+    }
+  })
+
+  const sortedRanking = [...userStats].sort((a, b) =>
     sortBy === 'points' ? b.points - a.points : b.predictions - a.predictions
   )
+
+  // Reasignar ranks después de ordenar
+  sortedRanking.forEach((user, index) => {
+    user.rank = index + 1
+  })
+
+  // Obtener predicciones del usuario seleccionado
+  const selectedUserPredictions = predictions.filter(p => p.user_id === selectedUser)
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -55,52 +130,54 @@ export default function RankingPage() {
           </div>
 
           {/* Top 3 Podium */}
-          <div className="mb-12">
-            <div className="flex justify-center items-end gap-4">
-              {/* 2nd Place */}
-              {sortedRanking[1] && (
-                <div className="text-center">
-                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center mb-2 mx-auto shadow-lg">
-                    <span className="text-3xl font-bold text-gray-700">2</span>
+          {sortedRanking.length >= 3 && (
+            <div className="mb-12">
+              <div className="flex justify-center items-end gap-4">
+                {/* 2nd Place */}
+                {sortedRanking[1] && (
+                  <div className="text-center">
+                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center mb-2 mx-auto shadow-lg">
+                      <span className="text-3xl font-bold text-gray-700">2</span>
+                    </div>
+                    <Medal className="w-6 h-6 text-gray-400 mx-auto mb-1" />
+                    <p className="font-bold text-text-primary">{sortedRanking[1].username}</p>
+                    <p className="text-2xl font-bold text-primary">{sortedRanking[1].points}</p>
+                    <p className="text-sm text-text-secondary">puntos</p>
+                    <p className="text-xs text-accent font-medium">30% del bote</p>
                   </div>
-                  <Medal className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                  <p className="font-bold text-text-primary">{sortedRanking[1].username}</p>
-                  <p className="text-2xl font-bold text-primary">{sortedRanking[1].points}</p>
-                  <p className="text-sm text-text-secondary">puntos</p>
-                  <p className="text-xs text-accent font-medium">30% del bote</p>
-                </div>
-              )}
+                )}
 
-              {/* 1st Place */}
-              {sortedRanking[0] && (
-                <div className="text-center transform -translate-y-4">
-                  <div className="w-32 h-32 rounded-full bg-gradient-to-br from-accent to-yellow-500 flex items-center justify-center mb-2 mx-auto shadow-xl ring-4 ring-accent">
-                    <Crown className="w-8 h-8 text-white" />
-                    <span className="absolute text-4xl font-bold text-white">1</span>
+                {/* 1st Place */}
+                {sortedRanking[0] && (
+                  <div className="text-center transform -translate-y-4">
+                    <div className="w-32 h-32 rounded-full bg-gradient-to-br from-accent to-yellow-500 flex items-center justify-center mb-2 mx-auto shadow-xl ring-4 ring-accent">
+                      <Crown className="w-8 h-8 text-white" />
+                      <span className="absolute text-4xl font-bold text-white">1</span>
+                    </div>
+                    <Trophy className="w-8 h-8 text-accent mx-auto mb-1" />
+                    <p className="font-bold text-xl text-text-primary">{sortedRanking[0].username}</p>
+                    <p className="text-3xl font-bold text-accent">{sortedRanking[0].points}</p>
+                    <p className="text-sm text-text-secondary">puntos</p>
+                    <p className="text-xs text-accent font-medium">60% del bote</p>
                   </div>
-                  <Trophy className="w-8 h-8 text-accent mx-auto mb-1" />
-                  <p className="font-bold text-xl text-text-primary">{sortedRanking[0].username}</p>
-                  <p className="text-3xl font-bold text-accent">{sortedRanking[0].points}</p>
-                  <p className="text-sm text-text-secondary">puntos</p>
-                  <p className="text-xs text-accent font-medium">60% del bote</p>
-                </div>
-              )}
+                )}
 
-              {/* 3rd Place */}
-              {sortedRanking[2] && (
-                <div className="text-center">
-                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center mb-2 mx-auto shadow-lg">
-                    <span className="text-3xl font-bold text-white">3</span>
+                {/* 3rd Place */}
+                {sortedRanking[2] && (
+                  <div className="text-center">
+                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center mb-2 mx-auto shadow-lg">
+                      <span className="text-3xl font-bold text-white">3</span>
+                    </div>
+                    <Medal className="w-6 h-6 text-amber-600 mx-auto mb-1" />
+                    <p className="font-bold text-text-primary">{sortedRanking[2].username}</p>
+                    <p className="text-2xl font-bold text-primary">{sortedRanking[2].points}</p>
+                    <p className="text-sm text-text-secondary">puntos</p>
+                    <p className="text-xs text-accent font-medium">10% del bote</p>
                   </div>
-                  <Medal className="w-6 h-6 text-amber-600 mx-auto mb-1" />
-                  <p className="font-bold text-text-primary">{sortedRanking[2].username}</p>
-                  <p className="text-2xl font-bold text-primary">{sortedRanking[2].points}</p>
-                  <p className="text-sm text-text-secondary">puntos</p>
-                  <p className="text-xs text-accent font-medium">10% del bote</p>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Sorting Options */}
           <div className="flex gap-4 mb-6 justify-center">
@@ -138,7 +215,7 @@ export default function RankingPage() {
                     <th className="px-6 py-4 font-semibold">Usuario</th>
                     <th className="px-6 py-4 font-semibold">Puntos</th>
                     <th className="px-6 py-4 font-semibold">Predicciones</th>
-                    <th className="px-6 py-4 font-semibold">Último Partido</th>
+                    <th className="px-6 py-4 font-semibold">Aciertos</th>
                     <th className="px-6 py-4 font-semibold">Acciones</th>
                   </tr>
                 </thead>
@@ -160,7 +237,12 @@ export default function RankingPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <Users className="w-5 h-5 text-text-secondary" />
-                          <span className="font-semibold text-text-primary">{user.username}</span>
+                          <span className="font-semibold text-text-primary">
+                            {user.username}
+                            {user.isAdmin && (
+                              <span className="ml-2 text-xs bg-fifa-gold text-white px-2 py-0.5 rounded">Admin</span>
+                            )}
+                          </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -168,10 +250,12 @@ export default function RankingPage() {
                         <span className="text-sm text-text-secondary ml-1">pts</span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-text-secondary">{user.predictions}/48</span>
+                        <span className="text-text-secondary">{user.predictions}</span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="text-sm text-text-secondary">{user.lastMatch}</span>
+                        <span className={`font-semibold ${user.correctPredictions > 0 ? 'text-fifa-green' : 'text-text-secondary'}`}>
+                          {user.correctPredictions}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         {isLoggedIn ? (
@@ -188,6 +272,13 @@ export default function RankingPage() {
                       </td>
                     </tr>
                   ))}
+                  {sortedRanking.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-8 text-center text-text-secondary">
+                        No hay usuarios registrados
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -207,25 +298,32 @@ export default function RankingPage() {
                   </button>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-text-secondary text-sm">Las predicciones se muestran solo cuando la fase está cerrada.</p>
-                  {/* Mock predictions display */}
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-sm text-text-secondary">Predicciones de fase de grupos</p>
-                    <div className="mt-2 space-y-2">
-                      <div className="flex justify-between items-center py-2 border-b border-gray-200">
-                        <span className="text-text-primary">Argentina vs Brasil</span>
-                        <span className="font-semibold text-primary">2 - 1</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2 border-b border-gray-200">
-                        <span className="text-text-primary">España vs Francia</span>
-                        <span className="font-semibold text-primary">1 - 1</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2">
-                        <span className="text-text-primary">Alemania vs Italia</span>
-                        <span className="font-semibold text-primary">3 - 2</span>
+                  {selectedUserPredictions.length === 0 ? (
+                    <p className="text-text-secondary text-center py-4">Este usuario no ha hecho predicciones</p>
+                  ) : (
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <p className="text-sm text-text-secondary mb-2">Predicciones realizadas</p>
+                      <div className="mt-2 space-y-2">
+                        {selectedUserPredictions.map((pred, idx) => (
+                          <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-200 last:border-0">
+                            <span className="text-text-primary">
+                              {pred.matches?.home_team || 'Equipo A'} vs {pred.matches?.away_team || 'Equipo B'}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-primary">
+                                {pred.home_score} - {pred.away_score}
+                              </span>
+                              {pred.points !== undefined && pred.points > 0 && (
+                                <span className="text-xs bg-fifa-green text-white px-2 py-0.5 rounded">
+                                  +{pred.points} pts
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -234,15 +332,17 @@ export default function RankingPage() {
           {/* Stats Section */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
             <div className="bg-surface rounded-xl p-6 shadow-lg text-center">
-              <div className="text-4xl font-bold text-primary mb-2">10</div>
+              <div className="text-4xl font-bold text-primary mb-2">{users.length}</div>
               <p className="text-text-secondary">Participantes</p>
             </div>
             <div className="bg-surface rounded-xl p-6 shadow-lg text-center">
-              <div className="text-4xl font-bold text-accent mb-2">48</div>
+              <div className="text-4xl font-bold text-accent mb-2">{matches.length}</div>
               <p className="text-text-secondary">Partidos Totales</p>
             </div>
             <div className="bg-surface rounded-xl p-6 shadow-lg text-center">
-              <div className="text-4xl font-bold text-fifa-green mb-2">156</div>
+              <div className="text-4xl font-bold text-fifa-green mb-2">
+                {sortedRanking[0]?.points || 0}
+              </div>
               <p className="text-text-secondary">Máximo Puntos</p>
             </div>
           </div>
