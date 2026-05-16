@@ -62,6 +62,17 @@ export async function getUsers() {
   return data
 }
 
+export async function updatePassword(username: string, newPassword: string) {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .update({ password: newPassword, must_change_password: false })
+    .eq('username', username)
+    .select()
+
+  if (error) throw new Error(error.message)
+  return data
+}
+
 // ==================== PARTIDOS ====================
 
 export async function getMatches() {

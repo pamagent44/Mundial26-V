@@ -5,6 +5,7 @@ import Footer from '@/components/Footer'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react'
+import { loginUser } from '@/app/actions'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -17,7 +18,6 @@ export default function LoginPage() {
 
   useEffect(() => {
     setMounted(true)
-    // Check if already logged in
     const token = localStorage.getItem('auth_token')
     if (token) {
       router.push('/dashboard')
@@ -32,33 +32,18 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      // Simulated authentication - In production, this would call an API
-      // Admin user: admin / 1234
-      if (username === 'admin' && password === '1234') {
-        const userData = { username: 'admin', isAdmin: true, mustChangePassword: false }
-        localStorage.setItem('auth_token', 'admin_token_' + Date.now())
-        localStorage.setItem('user', JSON.stringify(userData))
-        router.push('/dashboard')
+      const user = await loginUser(username, password)
+      
+      localStorage.setItem('auth_token', 'user_token_' + Date.now())
+      localStorage.setItem('user', JSON.stringify(user))
+
+      if (user.must_change_password) {
+        router.push('/change-password')
       } else {
-        // Check localStorage for registered users
-        const users = JSON.parse(localStorage.getItem('users') || '[]')
-        const user = users.find((u: any) => u.username === username && u.password === password)
-
-        if (user) {
-          localStorage.setItem('auth_token', 'user_token_' + Date.now())
-          localStorage.setItem('user', JSON.stringify(user))
-
-          if (user.mustChangePassword) {
-            router.push('/change-password')
-          } else {
-            router.push('/dashboard')
-          }
-        } else {
-          setError('Usuario o contraseña incorrectos')
-        }
+        router.push('/dashboard')
       }
-    } catch (err) {
-      setError('Error al iniciar sesión. Intenta de nuevo.')
+    } catch (err: any) {
+      setError(err.message || 'Usuario o contraseña incorrectos')
     } finally {
       setLoading(false)
     }
@@ -70,7 +55,6 @@ export default function LoginPage() {
 
       <main className="flex-1 flex items-center justify-center py-12 px-4 bg-gradient-to-br from-background to-primary/5">
         <div className="w-full max-w-md">
-          {/* Login Card */}
           <div className="bg-surface rounded-2xl shadow-xl p-8 border border-gray-100">
             <div className="text-center mb-8">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-full mb-4">
@@ -88,7 +72,6 @@ export default function LoginPage() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Username */}
               <div>
                 <label htmlFor="username" className="block text-sm font-medium text-text-primary mb-2">
                   Usuario
@@ -104,7 +87,6 @@ export default function LoginPage() {
                 />
               </div>
 
-              {/* Password */}
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-text-primary mb-2">
                   Contraseña
@@ -129,7 +111,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={loading}

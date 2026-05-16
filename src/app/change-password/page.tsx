@@ -5,6 +5,7 @@ import Footer from '@/components/Footer'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, Lock, CheckCircle, AlertCircle } from 'lucide-react'
+import { updatePassword } from '@/app/actions'
 
 export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -56,15 +57,9 @@ export default function ChangePasswordPage() {
 
     try {
       const userData = JSON.parse(localStorage.getItem('user') || '{}')
-      const users = JSON.parse(localStorage.getItem('users') || '[]')
-
-      // Find and update user
-      const userIndex = users.findIndex((u: any) => u.username === userData.username)
-      if (userIndex !== -1) {
-        users[userIndex].password = newPassword
-        users[userIndex].mustChangePassword = false
-        localStorage.setItem('users', JSON.stringify(users))
-      }
+      
+      // Actualizar en Supabase
+      await updatePassword(userData.username, newPassword)
 
       // Update current session
       userData.mustChangePassword = false
@@ -74,8 +69,8 @@ export default function ChangePasswordPage() {
       setTimeout(() => {
         router.push('/dashboard')
       }, 1500)
-    } catch (err) {
-      setError('Error al cambiar la contraseña. Intenta de nuevo.')
+    } catch (err: any) {
+      setError(err.message || 'Error al cambiar la contraseña. Intenta de nuevo.')
     } finally {
       setLoading(false)
     }
