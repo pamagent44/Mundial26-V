@@ -298,25 +298,25 @@ export async function calculateUserPoints(userId: string) {
     if (pred.away_score === match.away_score) points += 3
     else if (Math.abs(pred.away_score - match.away_score) === 1) points += 1
 
-    const multiplier = {
+    const multipliers: Record<string, number> = {
       'groups': 1,
       'round16': 2,
       'quarterfinals': 3,
       'semifinals': 4,
       'final': 5,
       'thirdplace': 4
-    }[match.phase] || 1
+    }
+
+    const multiplier = multipliers[match.phase as string] || 1
 
     totalPoints += points * multiplier
 
-    // Actualizar puntos de la predicción
     await supabaseAdmin
       .from('predictions')
       .update({ points: points * multiplier })
       .eq('id', pred.id)
   }
 
-  // Actualizar puntos del usuario
   await supabaseAdmin
     .from('users')
     .update({ points: totalPoints })
