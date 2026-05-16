@@ -73,6 +73,31 @@ export async function updatePassword(username: string, newPassword: string) {
   return data
 }
 
+export async function deleteUser(username: string) {
+  if (username === 'admin') {
+    throw new Error('No se puede eliminar el usuario admin')
+  }
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .delete()
+    .eq('username', username)
+
+  if (error) throw new Error(error.message)
+  return true
+}
+
+export async function resetPassword(username: string, tempPassword: string) {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .update({ password: tempPassword, must_change_password: true })
+    .eq('username', username)
+    .select()
+
+  if (error) throw new Error(error.message)
+  return data
+}
+
 // ==================== PARTIDOS ====================
 
 export async function getMatches() {
@@ -199,6 +224,19 @@ export async function getUserPredictions(userId: string) {
   return data
 }
 
+export async function getAllPredictions() {
+  const { data, error } = await supabaseAdmin
+    .from('predictions')
+    .select(`
+      *,
+      users (username),
+      matches (*)
+    `)
+
+  if (error) throw new Error(error.message)
+  return data
+}
+
 // ==================== RANKING ====================
 
 export async function getRankings() {
@@ -229,4 +267,60 @@ export async function updateRanking(userId: string, totalPoints: number, predict
 
   if (error) throw new Error(error.message)
   return data
+}
+
+export async function calculateUserPoints(userId: string) {
+  const { data: predictions } = await supabaseAdmin
+    .from('predictions')
+    .select(`
+      *,
+      matches (*)
+    `)
+    .eq('user_id', userId)
+
+  if (!predictions) return 0
+
+  let totalPoints = 0
+
+  for (const pred of predictions) {
+    const match = pred.matches
+    if (!match || match.status !== 'finished') continue
+
+    let points = 0
+    const actualResult = match.home_score > match.away_score ? 'home' :
+                         match.home_score < match.away_score ? 'away' : 'draw'
+    const predictedResult = pred.home_score > pred.away_score ? 'home' :
+                           pred.home_score < pred.away_score ? 'away' : 'draw'
+
+    if (actualResult === predictedResult) points += 5
+    if (pred.home_score === match.home_score) points += 3
+    else if (Math.abs(pred.home_score - match.home_score) === 1) points += 1
+    if (pred.away_score === match.away_score) points += 3
+    else if (Math.abs(pred.away_score - match.away_score) === 1) points += 1
+
+    const multiplier = {
+      'groups': 1,
+      'round16': 2,
+      'quarterfinals': 3,
+      'semifinals': 4,
+      'final': 5,
+      'thirdplace': 4
+    }[match.phase] || 1
+
+    totalPoints += points * multiplier
+
+    // Actualizar puntos de la predicción
+    await supabaseAdmin
+      .from('predictions')
+      .update({ points: points * multiplier })
+      .eq('id', pred.id)
+  }
+
+  // Actualizar puntos del usuario
+  await supabaseAdmin
+    .from('users')
+    .update({ points: totalPoints })
+    .eq('username', userId)
+
+  return totalPoints
 }
