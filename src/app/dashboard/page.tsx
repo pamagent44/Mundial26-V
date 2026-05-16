@@ -58,8 +58,6 @@ export default function DashboardPage() {
   const [newPassword, setNewPassword] = useState('')
   const [userCreated, setUserCreated] = useState(false)
   const [userError, setUserError] = useState('')
-
-  // Sync state
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
 
@@ -209,6 +207,8 @@ export default function DashboardPage() {
     const tempPassword = prompt('Introduce la nueva contraseña para admin:')
     if (tempPassword && tempPassword.length >= 6) {
       alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
+    } else {
+      alert('La contraseña debe tener al menos 6 caracteres')
     }
   }
 
@@ -526,9 +526,11 @@ export default function DashboardPage() {
                     </div>
                   )
                 })}
+                {matches.length === 0 && (
+                  <p className="text-text-secondary text-center py-8">No hay partidos disponibles. Sincroniza desde el panel de Admin.</p>
+                )}
               </div>
 
-              {/* Info Box */}
               <div className="mt-6 p-4 bg-accent/10 border border-accent rounded-lg">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
@@ -536,7 +538,6 @@ export default function DashboardPage() {
                     <p className="font-medium text-text-primary">Recuerda</p>
                     <p className="text-sm text-text-secondary">
                       Las predicciones se bloquean 24h antes del primer partido de cada fase.
-                      Hasta que terminen todos los partidos de la fase, no podrás ver las predicciones de otros usuarios.
                     </p>
                   </div>
                 </div>
@@ -552,7 +553,7 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
               </div>
 
-              {/* Sync Matches Button */}
+              {/* Sync Matches */}
               <div className="bg-fifa-green/5 border border-fifa-green/20 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <Calendar className="w-5 h-5 text-fifa-green" />
@@ -561,13 +562,11 @@ export default function DashboardPage() {
                 <p className="text-sm text-text-secondary mb-4">
                   Descarga los partidos oficiales del Mundial 2026 desde football-data.org
                 </p>
-                
                 {syncMessage && (
                   <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {syncMessage}
                   </div>
                 )}
-
                 <button
                   onClick={handleSyncMatches}
                   disabled={syncing}
@@ -590,7 +589,7 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {/* Create User Section */}
+              {/* Create User */}
               <div className="bg-fifa-blue/5 border border-fifa-blue/20 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <UserPlus className="w-5 h-5 text-primary" />
@@ -616,26 +615,159 @@ export default function DashboardPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label htmlFor="newUsername" className="block text-sm font-medium text-text-primary mb-2">
-                      Nombre de Usuario
-                    </label>
+                    <label className="block text-sm font-medium text-text-primary mb-2">Nombre de Usuario</label>
                     <input
                       type="text"
-                      id="newUsername"
                       value={newUsername}
                       onChange={(e) => setNewUsername(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
                       placeholder="Mínimo 3 caracteres"
-                      required
                     />
                   </div>
                   <div>
-                    <label htmlFor="newPassword" className="block text-sm font-medium text-text-primary mb-2">
-                      Contraseña Temporal
-                    </label>
+                    <label className="block text-sm font-medium text-text-primary mb-2">Contraseña Temporal</label>
                     <input
                       type="password"
-                      id="newPassword"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-4 py-2 border
+-primary outline-none"
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={handleCreateUser}
+                      className="w-full bg-primary hover:bg-fifa-blue text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      Crear Usuario
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Users List */}
+              <div className="bg-surface rounded-xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center gap-2 p-6 border-b border-gray-200">
+                  <Users className="w-5 h-5 text-primary" />
+                  <h3 className="font-semibold text-text-primary">Usuarios Registrados</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Usuario</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Rol</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Puntos</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {users.map((u) => (
+                        <tr key={u.username} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-3">
+                                <span className="text-sm font-bold text-primary">{u.username[0].toUpperCase()}</span>
+                              </div>
+                              <span className="font-medium text-text-primary">{u.username}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                              u.is_admin ? 'bg-fifa-red/10 text-fifa-red' : 'bg-primary/10 text-primary'
+                            }`}>
+                              {u.is_admin ? 'Admin' : 'Participante'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="font-bold text-text-primary">{u.points || 0}</span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleResetPassword(u.username)}
+                                className="p-2 text-text-secondary hover:text-primary transition-colors"
+                                title="Resetear contraseña"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUser(u.username)}
+                                className={`p-2 transition-colors ${
+                                  u.username === 'admin' ? 'text-gray-300 cursor-not-allowed' : 'text-text-secondary hover:text-fifa-red'
+                                }`}
+                                title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
+                                disabled={u.username === 'admin'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {users.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-text-secondary">
+                            No hay usuarios registrados
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      <Footer />
+    </div>
+  )
+}
+
+// Countdown Timer Component
+function CountdownTimer() {
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+
+  useEffect(() => {
+    // Mundial 2026 empieza el 11 de junio de 2026
+    const targetDate = new Date('2026-06-11T00:00:00')
+
+    const calculateTimeLeft = () => {
+      const now = new Date()
+      const difference = targetDate.getTime() - now.getTime()
+
+      if (difference > 0) {
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((difference / 1000 / 60) % 60),
+          seconds: Math.floor((difference / 1000) % 60),
+        })
+      }
+    }
+
+    calculateTimeLeft()
+    const timer = setInterval(calculateTimeLeft, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {[
+        { value: timeLeft.days, label: 'Días' },
+        { value: timeLeft.hours, label: 'Horas' },
+        { value: timeLeft.minutes, label: 'Min' },
+        { value: timeLeft.seconds, label: 'Seg' },
+      ].map((item, index) => (
+        <div key={index} className="bg-white/20 rounded-lg p-2 text-center">
+          <div className="text-2xl font-bold">{String(item.value).padStart(2, '0')}</div>
+          <div className="text-xs text-white/80">{item.label}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
