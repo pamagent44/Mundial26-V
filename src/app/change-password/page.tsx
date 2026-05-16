@@ -29,7 +29,8 @@ export default function ChangePasswordPage() {
     }
 
     const user = JSON.parse(userData)
-    if (!user.mustChangePassword) {
+    // Verificar ambos formatos
+    if (!user.mustChangePassword && !user.must_change_password) {
       router.push('/dashboard')
     }
   }, [router])
@@ -41,13 +42,11 @@ export default function ChangePasswordPage() {
     setError('')
     setSuccess('')
 
-    // Validate new password
     if (newPassword.length < 4) {
       setError('La nueva contraseña debe tener al menos 4 caracteres')
       return
     }
 
-    // Check password confirmation
     if (newPassword !== confirmPassword) {
       setError('Las contraseñas no coinciden')
       return
@@ -61,8 +60,9 @@ export default function ChangePasswordPage() {
       // Actualizar en Supabase
       await updatePassword(userData.username, newPassword)
 
-      // Update current session
+      // Update current session - ambos formatos
       userData.mustChangePassword = false
+      userData.must_change_password = false
       localStorage.setItem('user', JSON.stringify(userData))
 
       setSuccess('¡Contraseña actualizada! Redirigiendo al dashboard...')
@@ -82,7 +82,6 @@ export default function ChangePasswordPage() {
 
       <main className="flex-1 flex items-center justify-center py-12 px-4 bg-gradient-to-br from-background to-primary/5">
         <div className="w-full max-w-md">
-          {/* Change Password Card */}
           <div className="bg-surface rounded-2xl shadow-xl p-8 border border-gray-100">
             <div className="text-center mb-8">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-accent/10 rounded-full mb-4">
@@ -107,7 +106,6 @@ export default function ChangePasswordPage() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Current Password */}
               <div>
                 <label htmlFor="currentPassword" className="block text-sm font-medium text-text-primary mb-2">
                   Contraseña Actual
@@ -123,7 +121,6 @@ export default function ChangePasswordPage() {
                 />
               </div>
 
-              {/* New Password */}
               <div>
                 <label htmlFor="newPassword" className="block text-sm font-medium text-text-primary mb-2">
                   Nueva Contraseña
@@ -150,7 +147,6 @@ export default function ChangePasswordPage() {
                 <p className="text-xs text-text-secondary mt-1">Mínimo 4 caracteres</p>
               </div>
 
-              {/* Confirm Password */}
               <div>
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-text-primary mb-2">
                   Confirmar Nueva Contraseña
@@ -166,7 +162,6 @@ export default function ChangePasswordPage() {
                 />
               </div>
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={loading}
