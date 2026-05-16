@@ -10,7 +10,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Edit3, Save, Eye, EyeOff, Play, Pause,
   UserPlus, UserCheck, Trash2
 } from 'lucide-react'
-import { createUser, getUsers, getMatches, createPrediction, getUserPredictions } from '@/app/actions'
+import { createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI } from '@/app/actions'
 
 // Types
 interface Match {
@@ -53,10 +53,15 @@ export default function DashboardPage() {
   const router = useRouter()
 
   // Admin state
+  const [adminUsers, setAdminUsers] = useState<any[]>([])
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [userCreated, setUserCreated] = useState(false)
   const [userError, setUserError] = useState('')
+
+  // Sync state
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
 
   useEffect(() => {
     setMounted(true)
@@ -72,7 +77,6 @@ export default function DashboardPage() {
     setCurrentUser(parsedUser)
     setIsAdmin(parsedUser.isAdmin || parsedUser.is_admin || false)
 
-    // Cargar datos desde Supabase
     loadData(parsedUser.username)
   }, [router])
 
@@ -87,7 +91,6 @@ export default function DashboardPage() {
       setMatches(matchesData || [])
       setUsers(usersData || [])
 
-      // Convertir predicciones a formato del estado
       const preds: Record<string, { homeScore: number; awayScore: number }> = {}
       predictionsData?.forEach((p: any) => {
         preds[p.match_id] = { homeScore: p.home_score, awayScore: p.away_score }
@@ -124,14 +127,12 @@ export default function DashboardPage() {
     }
   }
 
-  // Guardar predicción en Supabase
   const handleSavePrediction = async (matchId: string) => {
     if (!currentUser) return
 
     try {
       await createPrediction(currentUser.username, matchId, tempPrediction.homeScore, tempPrediction.awayScore)
 
-      // Actualizar estado local
       const newPredictions = {
         ...predictions,
         [matchId]: tempPrediction
@@ -163,7 +164,6 @@ export default function DashboardPage() {
     return points
   }
 
-  // Crear usuario en Supabase
   const handleCreateUser = async () => {
     setUserError('')
     setUserCreated(false)
@@ -173,8 +173,8 @@ export default function DashboardPage() {
       return
     }
 
-    if (!newPassword || newPassword.length < 4) {
-      setUserError('La contraseña debe tener al menos 4 caracteres')
+    if (!newPassword || newPassword.length < 6) {
+      setUserError('La contraseña debe tener al menos 6 caracteres')
       return
     }
 
@@ -184,7 +184,6 @@ export default function DashboardPage() {
       setNewUsername('')
       setNewPassword('')
 
-      // Recargar lista de usuarios
       const usersData = await getUsers()
       setUsers(usersData || [])
 
@@ -194,26 +193,37 @@ export default function DashboardPage() {
     }
   }
 
-  // Delete user function (necesitarías añadir deleteUser a actions.ts)
   const handleDeleteUser = async (username: string) => {
     if (username === 'admin') {
       setUserError('No se puede eliminar el usuario admin')
       return
     }
-    // Por ahora solo local, añadir deleteUser a actions.ts si lo necesitas
     setUserError('Función no implementada en Supabase aún')
   }
 
-  // Reset password function (necesitarías añadir resetPassword a actions.ts)
   const handleResetPassword = async (username: string) => {
     setUserError('Función no implementada en Supabase aún')
   }
 
-  // Reset admin password
   const handleResetAdminPassword = () => {
     const tempPassword = prompt('Introduce la nueva contraseña para admin:')
-    if (tempPassword && tempPassword.length >= 4) {
+    if (tempPassword && tempPassword.length >= 6) {
       alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
+    }
+  }
+
+  const handleSyncMatches = async () => {
+    setSyncing(true)
+    setSyncMessage('')
+    try {
+      const result = await syncMatchesFromAPI()
+      setSyncMessage(`✅ ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
+      const matchesData = await getMatches()
+      setMatches(matchesData || [])
+    } catch (err: any) {
+      setSyncMessage('❌ ' + err.message)
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -378,7 +388,7 @@ export default function DashboardPage() {
                     </div>
                   ))}
                   {matches.length === 0 && (
-                    <p className="text-text-secondary text-center py-4 col-span-3">No hay partidos programados</p>
+                    <p className="text-text-secondary text-center py-4 col-span-3">No hay partidos programados. Sincroniza desde el panel de Admin.</p>
                   )}
                 </div>
               </div>
@@ -435,7 +445,6 @@ export default function DashboardPage() {
                           <p className="font-semibold text-text-primary">{match.home_team}</p>
                         </div>
 
-                        {/* Prediction Input / Display */}
                         <div className="flex items-center gap-4">
                           {canEdit ? (
                             isEditing ? (
@@ -543,6 +552,44 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
               </div>
 
+              {/* Sync Matches Button */}
+              <div className="bg-fifa-green/5 border border-fifa-green/20 rounded-xl p-6 mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar className="w-5 h-5 text-fifa-green" />
+                  <h3 className="font-semibold text-text-primary">Sincronizar Partidos</h3>
+                </div>
+                <p className="text-sm text-text-secondary mb-4">
+                  Descarga los partidos oficiales del Mundial 2026 desde football-data.org
+                </p>
+                
+                {syncMessage && (
+                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {syncMessage}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSyncMatches}
+                  disabled={syncing}
+                  className="w-full bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {syncing ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Sincronizando...
+                    </>
+                  ) : (
+                    <>
+                      <Calendar className="w-4 h-4" />
+                      Sincronizar Partidos Mundial 2026
+                    </>
+                  )}
+                </button>
+              </div>
+
               {/* Create User Section */}
               <div className="bg-fifa-blue/5 border border-fifa-blue/20 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -591,151 +638,4 @@ export default function DashboardPage() {
                       id="newPassword"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="Mínimo 6 caracteres"
-                      required
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      onClick={handleCreateUser}
-                      className="w-full bg-primary hover:bg-fifa-blue text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      Crear Usuario
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Admin Actions */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
-                  <Users className="w-8 h-8 text-primary mb-4" />
-                  <h3 className="font-semibold text-text-primary mb-2">Usuarios Totales</h3>
-                  <p className="text-2xl font-bold text-primary">{users.length}</p>
-                </div>
-                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
-                  <Calendar className="w-8 h-8 text-primary mb-4" />
-                  <h3 className="font-semibold text-text-primary mb-2">Gestionar Partidos</h3>
-                  <p className="text-sm text-text-secondary">Introducir resultados manualmente</p>
-                </div>
-                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
-                  <Star className="w-8 h-8 text-primary mb-4" />
-                  <h3 className="font-semibold text-text-primary mb-2">Ver Rankings</h3>
-                  <p className="text-sm text-text-secondary">Consultar ranking completo</p>
-                </div>
-              </div>
-
-              {/* Users List */}
-              <div className="border-t border-gray-200 pt-6">
-                <h3 className="font-semibold text-text-primary mb-4">Usuarios Registrados</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left text-text-secondary text-sm border-b border-gray-200">
-                        <th className="pb-3">Usuario</th>
-                        <th className="pb-3">Admin</th>
-                        <th className="pb-3">Debe Cambiar Pwd</th>
-                        <th className="pb-3">Puntos</th>
-                        <th className="pb-3">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map((u) => (
-                        <tr key={u.username} className="border-b border-gray-100">
-                          <td className="py-3 font-medium text-text-primary flex items-center gap-2">
-                            {u.is_admin && <Shield className="w-4 h-4 text-fifa-gold" />}
-                            {u.username}
-                          </td>
-                          <td className="py-3">{u.is_admin ? 'Sí' : 'No'}</td>
-                          <td className="py-3">
-                            {u.must_change_password ? (
-                              <span className="text-fifa-red">Sí</span>
-                            ) : (
-                              <span className="text-fifa-green">No</span>
-                            )}
-                          </td>
-                          <td className="py-3 font-bold text-primary">{u.points || 0}</td>
-                          <td className="py-3">
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleResetPassword(u.username)}
-                                className="text-primary hover:underline text-sm flex items-center gap-1"
-                              >
-                                <Shield className="w-4 h-4" />
-                                Resetear
-                              </button>
-                              {!u.is_admin && (
-                                <button
-                                  onClick={() => handleDeleteUser(u.username)}
-                                  className="text-fifa-red hover:underline text-sm flex items-center gap-1"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                  Eliminar
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </main>
-
-      <Footer />
-    </div>
-  )
-}
-
-// Countdown Component
-function CountdownTimer() {
-  const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
-
-  useEffect(() => {
-    const updateCountdown = () => {
-      const deadline = new Date('2026-06-14T18:00:00')
-      const now = new Date()
-      const diff = deadline.getTime() - now.getTime()
-
-      if (diff <= 0) {
-        setCountdown({ days: 0, hours: 0, minutes: 0, seconds: 0 })
-        return
-      }
-
-      setCountdown({
-        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
-        hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-        minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
-        seconds: Math.floor((diff % (1000 * 60)) / 1000)
-      })
-    }
-
-    updateCountdown()
-    const interval = setInterval(updateCountdown, 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  return (
-    <div className="flex justify-center gap-4">
-      {[
-        { value: countdown.days, label: 'Días' },
-        { value: countdown.hours, label: 'Horas' },
-        { value: countdown.minutes, label: 'Min' },
-        { value: countdown.seconds, label: 'Seg' }
-      ].map((item, index) => (
-        <div key={index} className="text-center">
-          <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center mb-2">
-            <span className="text-3xl font-bold">{item.value}</span>
-          </div>
-          <span className="text-sm text-white/80">{item.label}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
+                      className="w-full px-4 py-2 border
