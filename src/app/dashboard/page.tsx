@@ -10,67 +10,49 @@ import {
   CheckCircle, XCircle, AlertCircle, Edit3, Save, Eye, EyeOff, Play, Pause,
   UserPlus, UserCheck, Trash2
 } from 'lucide-react'
+import { createUser, getUsers, getMatches, createPrediction, getUserPredictions } from '@/app/actions'
 
 // Types
 interface Match {
   id: string
-  homeTeam: string
-  awayTeam: string
-  homeScore?: number
-  awayScore?: number
-  date: string
-  time: string
-  phase: 'groups' | 'round16' | 'quarterfinals' | 'semifinals' | 'final' | 'thirdplace'
+  home_team: string
+  away_team: string
+  home_score?: number
+  away_score?: number
+  match_date: string
+  phase: string
   status: 'upcoming' | 'live' | 'finished'
-  group?: string
+  group_name?: string
 }
 
 interface Prediction {
-  matchId: string
-  homeScore: number
-  awayScore: number
+  match_id: string
+  home_score: number
+  away_score: number
   points?: number
 }
 
-interface User {
+interface UserData {
   username: string
   points: number
-  predictions: Prediction[]
+  is_admin: boolean
+  must_change_password: boolean
 }
-
-// Mock data for matches
-const mockMatches: Match[] = [
-  // Group Stage - Sample matches
-  { id: '1', homeTeam: 'Argentina', awayTeam: 'Brasil', homeScore: 2, awayScore: 1, date: '2026-06-11', time: '18:00', phase: 'groups', status: 'finished', group: 'A' },
-  { id: '2', homeTeam: 'España', awayTeam: 'Francia', date: '2026-06-11', time: '21:00', phase: 'groups', status: 'live', group: 'A' },
-  { id: '3', homeTeam: 'Alemania', awayTeam: 'Italia', date: '2026-06-12', time: '18:00', phase: 'groups', status: 'upcoming', group: 'B' },
-  { id: '4', homeTeam: 'Inglaterra', awayTeam: 'Portugal', date: '2026-06-12', time: '21:00', phase: 'groups', status: 'upcoming', group: 'B' },
-  { id: '5', homeTeam: 'México', awayTeam: 'EE.UU.', date: '2026-06-13', time: '18:00', phase: 'groups', status: 'upcoming', group: 'C' },
-  { id: '6', homeTeam: 'Uruguay', awayTeam: 'Chile', date: '2026-06-13', time: '21:00', phase: 'groups', status: 'upcoming', group: 'C' },
-]
-
-// Mock users for ranking
-const mockUsers = [
-  { username: 'admin', points: 156, isAdmin: true },
-  { username: 'Juanito', points: 142 },
-  { username: 'Maria92', points: 138 },
-  { username: 'Carlos_88', points: 125 },
-  { username: 'Elena_M', points: 118 },
-]
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'predictions' | 'admin'>('dashboard')
   const [mounted, setMounted] = useState(false)
-  const [user, setUser] = useState<User | null>(null)
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [predictions, setPredictions] = useState<Record<string, { homeScore: number; awayScore: number }>>({})
   const [editingMatch, setEditingMatch] = useState<string | null>(null)
   const [tempPrediction, setTempPrediction] = useState({ homeScore: 0, awayScore: 0 })
-  const [currentUser, setCurrentUser] = useState<any>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [matches, setMatches] = useState<Match[]>([])
+  const [users, setUsers] = useState<UserData[]>([])
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   // Admin state
-  const [adminUsers, setAdminUsers] = useState<any[]>([])
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [userCreated, setUserCreated] = useState(false)
@@ -88,84 +70,34 @@ export default function DashboardPage() {
 
     const parsedUser = JSON.parse(userData)
     setCurrentUser(parsedUser)
-    setIsAdmin(parsedUser.isAdmin || false)
+    setIsAdmin(parsedUser.isAdmin || parsedUser.is_admin || false)
 
-    // Load saved predictions
-    const savedPredictions = localStorage.getItem('predictions_' + parsedUser.username)
-    if (savedPredictions) {
-      setPredictions(JSON.parse(savedPredictions))
-    }
-
-    // Load users for admin
-    const users = JSON.parse(localStorage.getItem('users') || '[]')
-    setAdminUsers(users)
+    // Cargar datos desde Supabase
+    loadData(parsedUser.username)
   }, [router])
 
-  // Calculate countdown for groups deadline
-  const getCountdown = () => {
-    // Mock deadline: 24 hours before first match of each phase
-    const deadline = new Date('2026-06-14T18:00:00')
-    const now = new Date()
-    const diff = deadline.getTime() - now.getTime()
+  const loadData = async (username: string) => {
+    try {
+      const [matchesData, usersData, predictionsData] = await Promise.all([
+        getMatches(),
+        getUsers(),
+        getUserPredictions(username)
+      ])
 
-    if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 }
+      setMatches(matchesData || [])
+      setUsers(usersData || [])
 
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-    const seconds = Math.floor((diff % (1000 * 60)) / 1000)
-
-    return { days, hours, minutes, seconds }
-  }
-
-  const handleSavePrediction = (matchId: string) => {
-    if (!currentUser) return
-
-    const newPredictions = {
-      ...predictions,
-      [matchId]: tempPrediction
+      // Convertir predicciones a formato del estado
+      const preds: Record<string, { homeScore: number; awayScore: number }> = {}
+      predictionsData?.forEach((p: any) => {
+        preds[p.match_id] = { homeScore: p.home_score, awayScore: p.away_score }
+      })
+      setPredictions(preds)
+    } catch (err) {
+      console.error('Error cargando datos:', err)
+    } finally {
+      setLoading(false)
     }
-    setPredictions(newPredictions)
-    localStorage.setItem('predictions_' + currentUser.username, JSON.stringify(newPredictions))
-    setEditingMatch(null)
-  }
-
-  const getMatchPoints = (match: Match) => {
-    if (!match.homeScore !== undefined && match.awayScore !== undefined) return null
-    const prediction = predictions[match.id]
-    if (!prediction) return null
-
-    // Calculate points based on rules:
-    // - 5 pts for exact 1X2
-    // - 2 pts for close to 1X2 (1 position away)
-    // - 3 pts for exact team goals
-    // - 1 pt for close to goals (1 away)
-    let points = 0
-
-    // 1X2 logic
-    const actualResult = match.homeScore! > match.awayScore! ? 'home' :
-                         match.homeScore! < match.awayScore! ? 'away' : 'draw'
-    const predictedResult = prediction.homeScore > prediction.awayScore ? 'home' :
-                           prediction.homeScore < prediction.awayScore ? 'away' : 'draw'
-
-    if (actualResult === predictedResult) {
-      points += 5
-    }
-
-    // Goals logic
-    if (prediction.homeScore === match.homeScore) {
-      points += 3
-    } else if (Math.abs(prediction.homeScore - match.homeScore!) === 1) {
-      points += 1
-    }
-
-    if (prediction.awayScore === match.awayScore) {
-      points += 3
-    } else if (Math.abs(prediction.awayScore - match.awayScore!) === 1) {
-      points += 1
-    }
-
-    return points
   }
 
   const getPhaseMultiplier = (phase: string) => {
@@ -192,8 +124,47 @@ export default function DashboardPage() {
     }
   }
 
-  // Create user function
-  const handleCreateUser = () => {
+  // Guardar predicción en Supabase
+  const handleSavePrediction = async (matchId: string) => {
+    if (!currentUser) return
+
+    try {
+      await createPrediction(currentUser.username, matchId, tempPrediction.homeScore, tempPrediction.awayScore)
+
+      // Actualizar estado local
+      const newPredictions = {
+        ...predictions,
+        [matchId]: tempPrediction
+      }
+      setPredictions(newPredictions)
+      setEditingMatch(null)
+    } catch (err: any) {
+      alert('Error guardando predicción: ' + err.message)
+    }
+  }
+
+  const getMatchPoints = (match: Match) => {
+    if (match.home_score === undefined || match.away_score === undefined) return null
+    const prediction = predictions[match.id]
+    if (!prediction) return null
+
+    let points = 0
+    const actualResult = match.home_score > match.away_score ? 'home' :
+                         match.home_score < match.away_score ? 'away' : 'draw'
+    const predictedResult = prediction.homeScore > prediction.awayScore ? 'home' :
+                           prediction.homeScore < prediction.awayScore ? 'away' : 'draw'
+
+    if (actualResult === predictedResult) points += 5
+    if (prediction.homeScore === match.home_score) points += 3
+    else if (Math.abs(prediction.homeScore - match.home_score) === 1) points += 1
+    if (prediction.awayScore === match.away_score) points += 3
+    else if (Math.abs(prediction.awayScore - match.away_score) === 1) points += 1
+
+    return points
+  }
+
+  // Crear usuario en Supabase
+  const handleCreateUser = async () => {
     setUserError('')
     setUserCreated(false)
 
@@ -207,79 +178,53 @@ export default function DashboardPage() {
       return
     }
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]')
+    try {
+      await createUser(newUsername, newPassword, false)
+      setUserCreated(true)
+      setNewUsername('')
+      setNewPassword('')
 
-    if (users.find((u: any) => u.username === newUsername)) {
-      setUserError('El nombre de usuario ya existe')
-      return
+      // Recargar lista de usuarios
+      const usersData = await getUsers()
+      setUsers(usersData || [])
+
+      setTimeout(() => setUserCreated(false), 3000)
+    } catch (err: any) {
+      setUserError(err.message || 'Error creando usuario')
     }
-
-    const newUser = {
-      username: newUsername,
-      password: newPassword,
-      isAdmin: false,
-      mustChangePassword: true,
-      createdAt: new Date().toISOString(),
-      points: 0
-    }
-
-    users.push(newUser)
-    localStorage.setItem('users', JSON.stringify(users))
-    setAdminUsers(users)
-    setNewUsername('')
-    setNewPassword('')
-    setUserCreated(true)
-
-    setTimeout(() => setUserCreated(false), 3000)
   }
 
-  // Delete user function
-  const handleDeleteUser = (username: string) => {
+  // Delete user function (necesitarías añadir deleteUser a actions.ts)
+  const handleDeleteUser = async (username: string) => {
     if (username === 'admin') {
       setUserError('No se puede eliminar el usuario admin')
       return
     }
-
-    const users = JSON.parse(localStorage.getItem('users') || '[]')
-    const filteredUsers = users.filter((u: any) => u.username !== username)
-    localStorage.setItem('users', JSON.stringify(filteredUsers))
-    setAdminUsers(filteredUsers)
+    // Por ahora solo local, añadir deleteUser a actions.ts si lo necesitas
+    setUserError('Función no implementada en Supabase aún')
   }
 
-  // Reset password function
-  const handleResetPassword = (username: string) => {
-    const users = JSON.parse(localStorage.getItem('users') || '[]')
-    const userIndex = users.findIndex((u: any) => u.username === username)
-
-    if (userIndex !== -1) {
-      // Generate random temporary password
-      const tempPassword = Math.random().toString(36).substring(2, 8)
-      users[userIndex].password = tempPassword
-      users[userIndex].mustChangePassword = true
-      localStorage.setItem('users', JSON.stringify(users))
-      setAdminUsers([...users])
-      alert(`Contraseña reseteada para ${username}. Nueva contraseña temporal: ${tempPassword}`)
-    }
+  // Reset password function (necesitarías añadir resetPassword a actions.ts)
+  const handleResetPassword = async (username: string) => {
+    setUserError('Función no implementada en Supabase aún')
   }
 
   // Reset admin password
   const handleResetAdminPassword = () => {
     const tempPassword = prompt('Introduce la nueva contraseña para admin:')
     if (tempPassword && tempPassword.length >= 4) {
-      // Update localStorage admin password
-      const users = JSON.parse(localStorage.getItem('users') || '[]')
-      const adminInList = users.find((u: any) => u.username === 'admin')
-      if (adminInList) {
-        adminInList.password = tempPassword
-      }
-      localStorage.setItem('users', JSON.stringify(users))
-      alert('Contraseña de admin actualizada')
-    } else {
-      alert('La contraseña debe tener al menos 4 caracteres')
+      alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
     }
   }
 
-  if (!mounted) return null
+  if (!mounted || loading) {
+    return (
+      <div className="flex flex-col min-h-screen bg-background items-center justify-center">
+        <div className="animate-spin h-10 w-10 border-4 border-primary border-t-transparent rounded-full"></div>
+        <p className="mt-4 text-text-secondary">Cargando...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -356,7 +301,7 @@ export default function DashboardPage() {
                   <Link href="/ranking" className="text-primary font-semibold hover:underline">Ver todo</Link>
                 </div>
                 <div className="space-y-4">
-                  {mockUsers.slice(0, 3).map((u, index) => (
+                  {users.slice(0, 3).map((u, index) => (
                     <div key={u.username} className="flex items-center gap-4 p-3 rounded-lg bg-gray-50">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
                         index === 0 ? 'bg-accent text-text-primary' :
@@ -367,14 +312,17 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex-1">
                         <p className="font-semibold text-text-primary">{u.username}</p>
-                        <p className="text-sm text-text-secondary">{u.isAdmin ? 'Admin' : 'Participante'}</p>
+                        <p className="text-sm text-text-secondary">{u.is_admin ? 'Admin' : 'Participante'}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-bold text-primary">{u.points}</p>
+                        <p className="text-2xl font-bold text-primary">{u.points || 0}</p>
                         <p className="text-xs text-text-secondary">puntos</p>
                       </div>
                     </div>
                   ))}
+                  {users.length === 0 && (
+                    <p className="text-text-secondary text-center py-4">No hay usuarios registrados</p>
+                  )}
                 </div>
               </div>
 
@@ -382,15 +330,20 @@ export default function DashboardPage() {
               <div className="lg:col-span-3 bg-surface rounded-2xl shadow-lg p-6">
                 <div className="flex items-center gap-2 mb-6">
                   <Calendar className="w-6 h-6 text-primary" />
-                  <h2 className="text-xl font-bold text-text-primary">Partidos de Hoy</h2>
+                  <h2 className="text-xl font-bold text-text-primary">Próximos Partidos</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {mockMatches.slice(0, 3).map((match) => (
+                  {matches.slice(0, 6).map((match) => (
                     <div key={match.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded">
-                          {match.group}
+                          {getPhaseName(match.phase)}
                         </span>
+                        {match.group_name && (
+                          <span className="text-xs font-medium text-text-secondary bg-gray-200 px-2 py-1 rounded">
+                            Grupo {match.group_name}
+                          </span>
+                        )}
                         {match.status === 'live' && (
                           <span className="flex items-center gap-1 text-xs font-medium text-fifa-red bg-fifa-red/10 px-2 py-1 rounded animate-pulse">
                             <Play className="w-3 h-3" /> EN VIVO
@@ -404,24 +357,29 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="text-center flex-1">
-                          <p className="font-semibold text-sm text-text-primary">{match.homeTeam}</p>
+                          <p className="font-semibold text-sm text-text-primary">{match.home_team}</p>
                           <p className="text-lg font-bold text-text-primary">
-                            {match.homeScore !== undefined ? match.homeScore : '-'}
+                            {match.home_score !== undefined ? match.home_score : '-'}
                           </p>
                         </div>
                         <div className="text-center px-4">
                           <p className="text-text-secondary text-sm">vs</p>
-                          <p className="text-xs text-text-secondary">{match.time}</p>
+                          <p className="text-xs text-text-secondary">
+                            {new Date(match.match_date).toLocaleDateString()}
+                          </p>
                         </div>
                         <div className="text-center flex-1">
-                          <p className="font-semibold text-sm text-text-primary">{match.awayTeam}</p>
+                          <p className="font-semibold text-sm text-text-primary">{match.away_team}</p>
                           <p className="text-lg font-bold text-text-primary">
-                            {match.awayScore !== undefined ? match.awayScore : '-'}
+                            {match.away_score !== undefined ? match.away_score : '-'}
                           </p>
                         </div>
                       </div>
                     </div>
                   ))}
+                  {matches.length === 0 && (
+                    <p className="text-text-secondary text-center py-4 col-span-3">No hay partidos programados</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -449,7 +407,7 @@ export default function DashboardPage() {
 
               {/* Matches List */}
               <div className="space-y-4">
-                {mockMatches.map((match) => {
+                {matches.map((match) => {
                   const prediction = predictions[match.id]
                   const isEditing = editingMatch === match.id
                   const canEdit = match.status === 'upcoming'
@@ -461,18 +419,20 @@ export default function DashboardPage() {
                           <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded">
                             {getPhaseName(match.phase)}
                           </span>
-                          {match.group && (
+                          {match.group_name && (
                             <span className="text-xs font-medium text-text-secondary bg-gray-200 px-2 py-1 rounded">
-                              Grupo {match.group}
+                              Grupo {match.group_name}
                             </span>
                           )}
                         </div>
-                        <span className="text-sm text-text-secondary">{match.date} {match.time}</span>
+                        <span className="text-sm text-text-secondary">
+                          {new Date(match.match_date).toLocaleDateString()}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between">
                         <div className="text-center flex-1">
-                          <p className="font-semibold text-text-primary">{match.homeTeam}</p>
+                          <p className="font-semibold text-text-primary">{match.home_team}</p>
                         </div>
 
                         {/* Prediction Input / Display */}
@@ -545,7 +505,7 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="text-center flex-1">
-                          <p className="font-semibold text-text-primary">{match.awayTeam}</p>
+                          <p className="font-semibold text-text-primary">{match.away_team}</p>
                         </div>
                       </div>
 
@@ -653,7 +613,7 @@ export default function DashboardPage() {
                 <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
                   <Users className="w-8 h-8 text-primary mb-4" />
                   <h3 className="font-semibold text-text-primary mb-2">Usuarios Totales</h3>
-                  <p className="text-2xl font-bold text-primary">{adminUsers.length}</p>
+                  <p className="text-2xl font-bold text-primary">{users.length}</p>
                 </div>
                 <div className="bg-gray-50 p-6 rounded-xl border border-gray-200">
                   <Calendar className="w-8 h-8 text-primary mb-4" />
@@ -675,45 +635,28 @@ export default function DashboardPage() {
                     <thead>
                       <tr className="text-left text-text-secondary text-sm border-b border-gray-200">
                         <th className="pb-3">Usuario</th>
-                        <th className="pb-3">Contraseña Temporal</th>
+                        <th className="pb-3">Admin</th>
                         <th className="pb-3">Debe Cambiar Pwd</th>
-                        <th className="pb-3">Fecha Creación</th>
+                        <th className="pb-3">Puntos</th>
                         <th className="pb-3">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr className="border-b border-gray-100">
-                        <td className="py-3 font-medium text-text-primary flex items-center gap-2">
-                          <Shield className="w-4 h-4 text-fifa-gold" />
-                          admin
-                        </td>
-                        <td className="py-3 text-text-secondary font-mono">******</td>
-                        <td className="py-3"><span className="text-fifa-green">No</span></td>
-                        <td className="py-3 text-text-secondary">-</td>
-                        <td className="py-3">
-                          <button
-                            onClick={handleResetAdminPassword}
-                            className="text-primary hover:underline text-sm flex items-center gap-1"
-                          >
-                            <Shield className="w-4 h-4" />
-                            Cambiar Pwd
-                          </button>
-                        </td>
-                      </tr>
-                      {adminUsers.map((u) => (
+                      {users.map((u) => (
                         <tr key={u.username} className="border-b border-gray-100">
-                          <td className="py-3 font-medium text-text-primary">{u.username}</td>
-                          <td className="py-3 text-text-secondary font-mono">******</td>
+                          <td className="py-3 font-medium text-text-primary flex items-center gap-2">
+                            {u.is_admin && <Shield className="w-4 h-4 text-fifa-gold" />}
+                            {u.username}
+                          </td>
+                          <td className="py-3">{u.is_admin ? 'Sí' : 'No'}</td>
                           <td className="py-3">
-                            {u.mustChangePassword ? (
+                            {u.must_change_password ? (
                               <span className="text-fifa-red">Sí</span>
                             ) : (
                               <span className="text-fifa-green">No</span>
                             )}
                           </td>
-                          <td className="py-3 text-text-secondary text-sm">
-                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '-'}
-                          </td>
+                          <td className="py-3 font-bold text-primary">{u.points || 0}</td>
                           <td className="py-3">
                             <div className="flex gap-2">
                               <button
@@ -723,13 +666,15 @@ export default function DashboardPage() {
                                 <Shield className="w-4 h-4" />
                                 Resetear
                               </button>
-                              <button
-                                onClick={() => handleDeleteUser(u.username)}
-                                className="text-fifa-red hover:underline text-sm flex items-center gap-1"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                Eliminar
-                              </button>
+                              {!u.is_admin && (
+                                <button
+                                  onClick={() => handleDeleteUser(u.username)}
+                                  className="text-fifa-red hover:underline text-sm flex items-center gap-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Eliminar
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
