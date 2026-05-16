@@ -592,7 +592,7 @@ export default function DashboardPage() {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="Mínimo 4 caracteres"
+                      placeholder="Mínimo 6 caracteres"
                       required
                     />
                   </div>
