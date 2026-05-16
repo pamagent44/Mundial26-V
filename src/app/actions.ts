@@ -324,3 +324,147 @@ export async function calculateUserPoints(userId: string) {
 
   return totalPoints
 }
+
+// ==================== FOOTBALL-DATA.ORG API ====================
+
+export async function syncMatchesFromAPI() {
+  const apiKey = process.env.FOOTBALL_DATA_API_KEY
+  
+  if (!apiKey) {
+    throw new Error('FOOTBALL_DATA_API_KEY no configurada. Obtén una gratis en football-data.org')
+  }
+
+  try {
+    const response = await fetch('https://api.football-data.org/v4/competitions/WC/matches', {
+      headers: {
+        'X-Auth-Token': apiKey
+      }
+    })
+
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error('API Key inválida o sin acceso al Mundial 2026')
+      }
+      throw new Error(`Error API: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const matches = data.matches || []
+
+    let inserted = 0
+    let updated = 0
+
+    for (const match of matches) {
+      const matchData = {
+        home_team: match.homeTeam?.name || 'Por definir',
+        away_team: match.awayTeam?.name || 'Por definir',
+        match_date: match.utcDate,
+        phase: mapPhase(match.stage),
+        group_name: match.group?.replace('GROUP_', '') || null,
+        home_score: match.score?.fullTime?.home,
+        away_score: match.score?.fullTime?.away,
+        status: mapStatus(match.status)
+      }
+
+      const { data: existing } = await supabaseAdmin
+        .from('matches')
+        .select('id')
+        .eq('home_team', matchData.home_team)
+        .eq('away_team', matchData.away_team)
+        .eq('match_date', matchData.match_date)
+        .single()
+
+      if (existing) {
+        await supabaseAdmin
+          .from('matches')
+          .update(matchData)
+          .eq('id', existing.id)
+        updated++
+      } else {
+        await supabaseAdmin
+          .from('matches')
+          .insert([matchData])
+        inserted++
+      }
+    }
+
+    return { 
+      success: true, 
+      total: matches.length,
+      inserted,
+      updated
+    }
+  } catch (err: any) {
+    throw new Error('Error sincronizando: ' + err.message)
+  }
+}
+
+export async function updateLiveScores() {
+  const apiKey = process.env.FOOTBALL_DATA_API_KEY
+  
+  if (!apiKey) {
+    throw new Error('FOOTBALL_DATA_API_KEY no configurada')
+  }
+
+  try {
+    const response = await fetch('https://api.football-data.org/v4/competitions/WC/matches?status=LIVE,FINISHED', {
+      headers: {
+        'X-Auth-Token': apiKey
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Error API: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const matches = data.matches || []
+
+    for (const match of matches) {
+      const homeScore = match.score?.fullTime?.home
+      const awayScore = match.score?.fullTime?.away
+      
+      if (homeScore !== null && awayScore !== null) {
+        await supabaseAdmin
+          .from('matches')
+          .update({
+            home_score: homeScore,
+            away_score: awayScore,
+            status: match.status === 'FINISHED' ? 'finished' : 'live'
+          })
+          .eq('home_team', match.homeTeam?.name)
+          .eq('away_team', match.awayTeam?.name)
+      }
+    }
+
+    return { success: true, count: matches.length }
+  } catch (err: any) {
+    throw new Error('Error actualizando: ' + err.message)
+  }
+}
+
+function mapPhase(stage: string): string {
+  const phaseMap: Record<string, string> = {
+    'GROUP_STAGE': 'groups',
+    'ROUND_OF_16': 'round16',
+    'QUARTER_FINALS': 'quarterfinals',
+    'SEMI_FINALS': 'semifinals',
+    'FINAL': 'final',
+    'THIRD_PLACE': 'thirdplace'
+  }
+  return phaseMap[stage] || 'groups'
+}
+
+function mapStatus(status: string): string {
+  const statusMap: Record<string, string> = {
+    'SCHEDULED': 'upcoming',
+    'TIMED': 'upcoming',
+    'IN_PLAY': 'live',
+    'PAUSED': 'live',
+    'FINISHED': 'finished',
+    'POSTPONED': 'upcoming',
+    'CANCELLED': 'upcoming',
+    'SUSPENDED': 'upcoming'
+  }
+  return statusMap[status] || 'upcoming'
+}
