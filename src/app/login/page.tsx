@@ -34,8 +34,18 @@ export default function LoginPage() {
     try {
       const user = await loginUser(username, password)
       
+      // Guardar datos en localStorage con formato compatible
+      const userData = {
+        username: user.username,
+        isAdmin: user.is_admin,           // ← Para compatibilidad con dashboard
+        is_admin: user.is_admin,          // ← Original de Supabase
+        mustChangePassword: user.must_change_password,  // ← Compatible
+        must_change_password: user.must_change_password,  // ← Original
+        points: user.points || 0
+      }
+      
       localStorage.setItem('auth_token', 'user_token_' + Date.now())
-      localStorage.setItem('user', JSON.stringify(user))
+      localStorage.setItem('user', JSON.stringify(userData))
 
       if (user.must_change_password) {
         router.push('/change-password')
