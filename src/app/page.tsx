@@ -50,7 +50,7 @@ export default function Home() {
 
             <p className="text-xl md:text-2xl text-white/90 mb-8 max-w-3xl mx-auto">
               Participa en la porra más esperada del año. Predice resultados, acumula puntos y
-              compitete por ser el rey del fútbol.
+              compite por ser el rey del fútbol.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
