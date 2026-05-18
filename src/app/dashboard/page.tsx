@@ -50,6 +50,7 @@ export default function DashboardPage() {
   const [matches, setMatches] = useState<Match[]>([])
   const [users, setUsers] = useState<UserData[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedPhase, setSelectedPhase] = useState<string | null>(null)
   const router = useRouter()
 
   // Admin state
@@ -137,7 +138,7 @@ export default function DashboardPage() {
       setPredictions(newPredictions)
       setEditingMatch(null)
     } catch (err: any) {
-      alert('Error guardando predicci\u00f3n: ' + err.message)
+      alert('Error guardando predicción: ' + err.message)
     }
   }
 
@@ -171,7 +172,7 @@ export default function DashboardPage() {
     }
 
     if (!newPassword || newPassword.length < 6) {
-      setUserError('La contrase\u00f1a debe tener al menos 6 caracteres')
+      setUserError('La contraseña debe tener al menos 6 caracteres')
       return
     }
 
@@ -195,19 +196,19 @@ export default function DashboardPage() {
       setUserError('No se puede eliminar el usuario admin')
       return
     }
-    setUserError('Funci\u00f3n no implementada en Supabase a\u00fan')
+    setUserError('Función no implementada en Supabase aún')
   }
 
   const handleResetPassword = async (username: string) => {
-    setUserError('Funci\u00f3n no implementada en Supabase a\u00fan')
+    setUserError('Función no implementada en Supabase aún')
   }
 
   const handleResetAdminPassword = () => {
-    const tempPassword = prompt('Introduce la nueva contrase\u00f1a para admin:')
+    const tempPassword = prompt('Introduce la nueva contraseña para admin:')
     if (tempPassword && tempPassword.length >= 6) {
-      alert('Funci\u00f3n no implementada en Supabase a\u00fan. Usa Supabase Dashboard.')
+      alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
     } else {
-      alert('La contrase\u00f1a debe tener al menos 6 caracteres')
+      alert('La contraseña debe tener al menos 6 caracteres')
     }
   }
 
@@ -216,11 +217,11 @@ export default function DashboardPage() {
     setSyncMessage('')
     try {
       const result = await syncMatchesFromAPI()
-      setSyncMessage(`\u2705 ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
+      setSyncMessage(`✅ ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
       const matchesData = await getMatches()
       setMatches(matchesData || [])
     } catch (err: any) {
-      setSyncMessage('\u274c ' + err.message)
+      setSyncMessage('❌ ' + err.message)
     } finally {
       setSyncing(false)
     }
@@ -244,7 +245,7 @@ export default function DashboardPage() {
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-text-primary mb-2">
-              \u00a1Bienvenido, {currentUser?.username}!
+              ¡Bienvenido, {currentUser?.username}!
             </h1>
             <p className="text-text-secondary">Panel de control de la porra del Mundial 2026</p>
           </div>
@@ -339,7 +340,7 @@ export default function DashboardPage() {
               <div className="lg:col-span-3 bg-surface rounded-2xl shadow-lg p-6">
                 <div className="flex items-center gap-2 mb-6">
                   <Calendar className="w-6 h-6 text-primary" />
-                  <h2 className="text-xl font-bold text-text-primary">Pr\u00f3ximos Partidos</h2>
+                  <h2 className="text-xl font-bold text-text-primary">Próximos Partidos</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {matches.slice(0, 6).map((match) => (
@@ -407,7 +408,12 @@ export default function DashboardPage() {
                 {['groups', 'round16', 'quarterfinals', 'semifinals', 'final', 'thirdplace'].map((phase) => (
                   <button
                     key={phase}
-                    className="px-4 py-2 rounded-lg font-medium bg-gray-100 text-text-secondary hover:bg-primary hover:text-white transition-colors whitespace-nowrap"
+                    onClick={() => setSelectedPhase(selectedPhase === phase ? null : phase)}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                      selectedPhase === phase
+                        ? 'bg-primary text-white'
+                        : 'bg-gray-100 text-text-secondary hover:bg-primary hover:text-white'
+                    }`}
                   >
                     {getPhaseName(phase)} (x{getPhaseMultiplier(phase)})
                   </button>
@@ -416,7 +422,21 @@ export default function DashboardPage() {
 
               {/* Matches List */}
               <div className="space-y-4">
-                {matches.map((match) => {
+                {selectedPhase && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm text-text-secondary">Filtrando por:</span>
+                    <span className="px-3 py-1 bg-primary text-white text-sm rounded-full font-medium">
+                      {getPhaseName(selectedPhase)}
+                    </span>
+                    <button
+                      onClick={() => setSelectedPhase(null)}
+                      className="text-sm text-fifa-red hover:underline"
+                    >
+                      Limpiar filtro
+                    </button>
+                  </div>
+                )}
+                {matches.filter(match => !selectedPhase || match.phase === selectedPhase).map((match) => {
                   const prediction = predictions[match.id]
                   const isEditing = editingMatch === match.id
                   const canEdit = match.status === 'upcoming'
@@ -519,14 +539,18 @@ export default function DashboardPage() {
 
                       {!canEdit && !prediction && (
                         <p className="text-sm text-center text-text-secondary mt-2">
-                          No hiciste predicci\u00f3n para este partido
+                          No hiciste predicción para este partido
                         </p>
                       )}
                     </div>
                   )
                 })}
-                {matches.length === 0 && (
-                  <p className="text-text-secondary text-center py-8">No hay partidos disponibles. Sincroniza desde el panel de Admin.</p>
+                {matches.filter(match => !selectedPhase || match.phase === selectedPhase).length === 0 && (
+                  <p className="text-text-secondary text-center py-8">
+                    {selectedPhase
+                      ? `No hay partidos en ${getPhaseName(selectedPhase)}.`
+                      : 'No hay partidos disponibles. Sincroniza desde el panel de Admin.'}
+                  </p>
                 )}
               </div>
 
@@ -549,7 +573,7 @@ export default function DashboardPage() {
             <div className="bg-surface rounded-2xl shadow-lg p-6">
               <div className="flex items-center gap-2 mb-6">
                 <Shield className="w-6 h-6 text-fifa-red" />
-                <h2 className="text-xl font-bold text-text-primary">Panel de Administraci\u00f3n</h2>
+                <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
               </div>
 
               {/* Sync Matches */}
@@ -562,7 +586,7 @@ export default function DashboardPage() {
                   Descarga los partidos oficiales del Mundial 2026 desde football-data.org
                 </p>
                 {syncMessage && (
-                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('\u2705') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {syncMessage}
                   </div>
                 )}
@@ -595,7 +619,7 @@ export default function DashboardPage() {
                   <h3 className="font-semibold text-text-primary">Crear Nuevo Usuario</h3>
                 </div>
                 <p className="text-sm text-text-secondary mb-4">
-                  El usuario deber\u00e1 cambiar la contrase\u00f1a en su primer inicio de sesi\u00f3n.
+                  El usuario deberá cambiar la contraseña en su primer inicio de sesión.
                 </p>
 
                 {userError && (
@@ -608,7 +632,7 @@ export default function DashboardPage() {
                 {userCreated && (
                   <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
                     <UserCheck className="w-5 h-5 flex-shrink-0" />
-                    <span>\u00a1Usuario creado exitosamente!</span>
+                    <span>¡Usuario creado exitosamente!</span>
                   </div>
                 )}
 
@@ -620,17 +644,17 @@ export default function DashboardPage() {
                       value={newUsername}
                       onChange={(e) => setNewUsername(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="M\u00ednimo 3 caracteres"
+                      placeholder="Mínimo 3 caracteres"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-text-primary mb-2">Contrase\u00f1a Temporal</label>
+                    <label className="block text-sm font-medium text-text-primary mb-2">Contraseña Temporal</label>
                     <input
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="M\u00ednimo 6 caracteres"
+                      placeholder="Mínimo 6 caracteres"
                     />
                   </div>
                   <div className="flex items-end">
@@ -687,7 +711,7 @@ export default function DashboardPage() {
                               <button
                                 onClick={() => handleResetPassword(u.username)}
                                 className="p-2 text-text-secondary hover:text-primary transition-colors"
-                                title="Resetear contrase\u00f1a"
+                                title="Resetear contraseña"
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>
@@ -756,7 +780,7 @@ function CountdownTimer() {
   return (
     <div className="grid grid-cols-4 gap-2">
       {[
-        { value: timeLeft.days, label: 'D\u00edas' },
+        { value: timeLeft.days, label: 'Días' },
         { value: timeLeft.hours, label: 'Horas' },
         { value: timeLeft.minutes, label: 'Min' },
         { value: timeLeft.seconds, label: 'Seg' },
