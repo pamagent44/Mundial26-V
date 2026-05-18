@@ -1,6 +1,7 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { fixMatchPhase } from '@/lib/utils/matchPhaseMapper'
 
 // ==================== USUARIOS ====================
 
@@ -302,6 +303,7 @@ export async function calculateUserPoints(userId: string) {
 
     const multipliers: Record<string, number> = {
       'groups': 1,
+      'round32': 1,      // Dieciseisavos mismo multiplicador que grupos (o ajusta si quieres x2)
       'round16': 2,
       'quarterfinals': 3,
       'semifinals': 4,
@@ -357,11 +359,14 @@ export async function syncMatchesFromAPI() {
     let updated = 0
 
     for (const match of matches) {
+      // ⭐ USAMOS EL MAPPER MEJORADO QUE CORRIGE POR FECHA SI ES NECESARIO ⭐
+      const correctedPhase = mapPhaseWithCorrection(match)
+      
       const matchData = {
         home_team: match.homeTeam?.name || 'Por definir',
         away_team: match.awayTeam?.name || 'Por definir',
         match_date: match.utcDate,
-        phase: mapPhase(match.stage),
+        phase: correctedPhase,  // ← Fase corregida (dieciseisavos, octavos, etc.)
         group_name: match.group?.replace('GROUP_', '') || null,
         home_score: match.score?.fullTime?.home,
         away_score: match.score?.fullTime?.away,
@@ -445,16 +450,56 @@ export async function updateLiveScores() {
   }
 }
 
-function mapPhase(stage: string): string {
+// ==================== FUNCIONES AUXILIARES MEJORADAS ====================
+
+/**
+ * Mapea la fase de la API a nuestro slug interno
+ * PRIORIDAD:
+ * 1. Si la API ya tiene una fase eliminatoria correcta (ROUND_OF_16, QUARTER_FINALS, etc.) la usamos
+ * 2. Si no, usamos el fixMatchPhase que corrige por fecha según el calendario FIFA 2026
+ */
+function mapPhaseWithCorrection(match: any): string {
+  const apiStage = match.stage
+  
+  // Caso 1: La API ya nos dice explícitamente que es una fase eliminatoria
+  // Esto incluirá ROUND_OF_32, ROUND_OF_16, QUARTER_FINALS, etc. cuando lo implementen
+  if (apiStage && apiStage !== 'GROUP_STAGE') {
+    const directPhase = mapKnownPhase(apiStage)
+    if (directPhase !== 'groups') {
+      // Si la API ya sabe que no es fase de grupos, usamos lo que diga
+      return directPhase
+    }
+  }
+  
+  // Caso 2: La API dice GROUP_STAGE o no tiene fase clara
+  // Usamos nuestro mapper basado en fechas del calendario FIFA 2026
+  return fixMatchPhase({
+    stage: apiStage,
+    phase: match.phase,
+    utcDate: match.utcDate
+  })
+}
+
+/**
+ * Mapea las fases conocidas de football-data.org a nuestros slugs
+ * Incluye ROUND_OF_32 para cuando la API lo implemente
+ */
+function mapKnownPhase(stage: string): string {
   const phaseMap: Record<string, string> = {
     'GROUP_STAGE': 'groups',
-    'ROUND_OF_16': 'round16',
+    'ROUND_OF_32': 'round32',      // Dieciseisavos (cuando lo añadan)
+    'ROUND_OF_16': 'round16',      // Octavos
     'QUARTER_FINALS': 'quarterfinals',
     'SEMI_FINALS': 'semifinals',
     'FINAL': 'final',
     'THIRD_PLACE': 'thirdplace'
   }
   return phaseMap[stage] || 'groups'
+}
+
+// Mantenemos la función antigua por compatibilidad (aunque ya no se usa directamente)
+function mapPhase(stage: string): string {
+  return mapKnownPhase(stage)
 }
 
 function mapStatus(status: string): string {
