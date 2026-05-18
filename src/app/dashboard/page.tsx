@@ -53,7 +53,6 @@ export default function DashboardPage() {
   const router = useRouter()
 
   // Admin state
-  const [adminUsers, setAdminUsers] = useState<any[]>([])
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [userCreated, setUserCreated] = useState(false)
@@ -138,7 +137,7 @@ export default function DashboardPage() {
       setPredictions(newPredictions)
       setEditingMatch(null)
     } catch (err: any) {
-      alert('Error guardando predicción: ' + err.message)
+      alert('Error guardando predicci\u00f3n: ' + err.message)
     }
   }
 
@@ -172,7 +171,7 @@ export default function DashboardPage() {
     }
 
     if (!newPassword || newPassword.length < 6) {
-      setUserError('La contraseña debe tener al menos 6 caracteres')
+      setUserError('La contrase\u00f1a debe tener al menos 6 caracteres')
       return
     }
 
@@ -196,19 +195,19 @@ export default function DashboardPage() {
       setUserError('No se puede eliminar el usuario admin')
       return
     }
-    setUserError('Función no implementada en Supabase aún')
+    setUserError('Funci\u00f3n no implementada en Supabase a\u00fan')
   }
 
   const handleResetPassword = async (username: string) => {
-    setUserError('Función no implementada en Supabase aún')
+    setUserError('Funci\u00f3n no implementada en Supabase a\u00fan')
   }
 
   const handleResetAdminPassword = () => {
-    const tempPassword = prompt('Introduce la nueva contraseña para admin:')
+    const tempPassword = prompt('Introduce la nueva contrase\u00f1a para admin:')
     if (tempPassword && tempPassword.length >= 6) {
-      alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
+      alert('Funci\u00f3n no implementada en Supabase a\u00fan. Usa Supabase Dashboard.')
     } else {
-      alert('La contraseña debe tener al menos 6 caracteres')
+      alert('La contrase\u00f1a debe tener al menos 6 caracteres')
     }
   }
 
@@ -217,11 +216,11 @@ export default function DashboardPage() {
     setSyncMessage('')
     try {
       const result = await syncMatchesFromAPI()
-      setSyncMessage(`✅ ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
+      setSyncMessage(`\u2705 ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
       const matchesData = await getMatches()
       setMatches(matchesData || [])
     } catch (err: any) {
-      setSyncMessage('❌ ' + err.message)
+      setSyncMessage('\u274c ' + err.message)
     } finally {
       setSyncing(false)
     }
@@ -245,7 +244,7 @@ export default function DashboardPage() {
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-text-primary mb-2">
-              ¡Bienvenido, {currentUser?.username}!
+              \u00a1Bienvenido, {currentUser?.username}!
             </h1>
             <p className="text-text-secondary">Panel de control de la porra del Mundial 2026</p>
           </div>
@@ -340,7 +339,7 @@ export default function DashboardPage() {
               <div className="lg:col-span-3 bg-surface rounded-2xl shadow-lg p-6">
                 <div className="flex items-center gap-2 mb-6">
                   <Calendar className="w-6 h-6 text-primary" />
-                  <h2 className="text-xl font-bold text-text-primary">Próximos Partidos</h2>
+                  <h2 className="text-xl font-bold text-text-primary">Pr\u00f3ximos Partidos</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {matches.slice(0, 6).map((match) => (
@@ -520,7 +519,7 @@ export default function DashboardPage() {
 
                       {!canEdit && !prediction && (
                         <p className="text-sm text-center text-text-secondary mt-2">
-                          No hiciste predicción para este partido
+                          No hiciste predicci\u00f3n para este partido
                         </p>
                       )}
                     </div>
@@ -550,7 +549,7 @@ export default function DashboardPage() {
             <div className="bg-surface rounded-2xl shadow-lg p-6">
               <div className="flex items-center gap-2 mb-6">
                 <Shield className="w-6 h-6 text-fifa-red" />
-                <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
+                <h2 className="text-xl font-bold text-text-primary">Panel de Administraci\u00f3n</h2>
               </div>
 
               {/* Sync Matches */}
@@ -563,7 +562,7 @@ export default function DashboardPage() {
                   Descarga los partidos oficiales del Mundial 2026 desde football-data.org
                 </p>
                 {syncMessage && (
-                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('\u2705') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                     {syncMessage}
                   </div>
                 )}
@@ -596,7 +595,7 @@ export default function DashboardPage() {
                   <h3 className="font-semibold text-text-primary">Crear Nuevo Usuario</h3>
                 </div>
                 <p className="text-sm text-text-secondary mb-4">
-                  El usuario deberá cambiar la contraseña en su primer inicio de sesión.
+                  El usuario deber\u00e1 cambiar la contrase\u00f1a en su primer inicio de sesi\u00f3n.
                 </p>
 
                 {userError && (
@@ -609,7 +608,7 @@ export default function DashboardPage() {
                 {userCreated && (
                   <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
                     <UserCheck className="w-5 h-5 flex-shrink-0" />
-                    <span>¡Usuario creado exitosamente!</span>
+                    <span>\u00a1Usuario creado exitosamente!</span>
                   </div>
                 )}
 
@@ -621,17 +620,17 @@ export default function DashboardPage() {
                       value={newUsername}
                       onChange={(e) => setNewUsername(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="Mínimo 3 caracteres"
+                      placeholder="M\u00ednimo 3 caracteres"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-text-primary mb-2">Contraseña Temporal</label>
+                    <label className="block text-sm font-medium text-text-primary mb-2">Contrase\u00f1a Temporal</label>
                     <input
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
--primary outline-none"
-                      placeholder="Mínimo 6 caracteres"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                      placeholder="M\u00ednimo 6 caracteres"
                     />
                   </div>
                   <div className="flex items-end">
@@ -688,7 +687,7 @@ export default function DashboardPage() {
                               <button
                                 onClick={() => handleResetPassword(u.username)}
                                 className="p-2 text-text-secondary hover:text-primary transition-colors"
-                                title="Resetear contraseña"
+                                title="Resetear contrase\u00f1a"
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>
@@ -732,7 +731,6 @@ function CountdownTimer() {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
 
   useEffect(() => {
-    // Mundial 2026 empieza el 11 de junio de 2026
     const targetDate = new Date('2026-06-11T00:00:00')
 
     const calculateTimeLeft = () => {
@@ -758,7 +756,7 @@ function CountdownTimer() {
   return (
     <div className="grid grid-cols-4 gap-2">
       {[
-        { value: timeLeft.days, label: 'Días' },
+        { value: timeLeft.days, label: 'D\u00edas' },
         { value: timeLeft.hours, label: 'Horas' },
         { value: timeLeft.minutes, label: 'Min' },
         { value: timeLeft.seconds, label: 'Seg' },
