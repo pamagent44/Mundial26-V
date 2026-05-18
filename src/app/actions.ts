@@ -8,6 +8,7 @@ export async function createUser(username: string, password: string, isAdmin = f
   if (!username || username.length < 3) {
     throw new Error('El usuario debe tener al menos 3 caracteres')
   }
+
   if (!password || password.length < 6) {
     throw new Error('La contraseña debe tener al menos 6 caracteres')
   }
@@ -24,8 +25,8 @@ export async function createUser(username: string, password: string, isAdmin = f
 
   const { data, error } = await supabaseAdmin
     .from('users')
-    .insert([{ 
-      username, 
+    .insert([{
+      username,
       password,
       is_admin: isAdmin,
       must_change_password: true,
@@ -287,6 +288,7 @@ export async function calculateUserPoints(userId: string) {
     if (!match || match.status !== 'finished') continue
 
     let points = 0
+
     const actualResult = match.home_score > match.away_score ? 'home' :
                          match.home_score < match.away_score ? 'away' : 'draw'
     const predictedResult = pred.home_score > pred.away_score ? 'home' :
@@ -329,7 +331,7 @@ export async function calculateUserPoints(userId: string) {
 
 export async function syncMatchesFromAPI() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
-  
+
   if (!apiKey) {
     throw new Error('FOOTBALL_DATA_API_KEY no configurada. Obtén una gratis en football-data.org')
   }
@@ -388,8 +390,8 @@ export async function syncMatchesFromAPI() {
       }
     }
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       total: matches.length,
       inserted,
       updated
@@ -401,7 +403,7 @@ export async function syncMatchesFromAPI() {
 
 export async function updateLiveScores() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
-  
+
   if (!apiKey) {
     throw new Error('FOOTBALL_DATA_API_KEY no configurada')
   }
@@ -423,7 +425,7 @@ export async function updateLiveScores() {
     for (const match of matches) {
       const homeScore = match.score?.fullTime?.home
       const awayScore = match.score?.fullTime?.away
-      
+
       if (homeScore !== null && awayScore !== null) {
         await supabaseAdmin
           .from('matches')
