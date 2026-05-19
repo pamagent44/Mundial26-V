@@ -1,0 +1,16 @@
+name: Backup Automático de Predicciones
+
+on:
+  schedule:
+    # Ejecutar todos los días a las 23:30 UTC
+    - cron: '30 23 * * *'
+  workflow_dispatch:  # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hacer backup de predicciones
+        run: |
+          curl -X GET "https://${{ vars.VERCEL_PROJECT_NAME }}.vercel.app/api/cron/backup" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET_KEY }}"
