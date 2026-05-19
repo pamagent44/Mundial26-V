@@ -39,6 +39,17 @@ interface UserData {
   must_change_password: boolean
 }
 
+// Definición de fases para el Mundial 2026 (48 equipos)
+const PHASES = [
+  { key: 'groups', label: 'Fase de Grupos', multiplier: 1 },
+  { key: 'round32', label: 'Ronda de 32', multiplier: 2 },      // ← NUEVO: Dieciseisavos (x2)
+  { key: 'round16', label: 'Octavos', multiplier: 2 },
+  { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
+  { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
+  { key: 'final', label: 'Final', multiplier: 5 },
+  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 },
+]
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'predictions' | 'admin'>('dashboard')
   const [mounted, setMounted] = useState(false)
@@ -102,27 +113,13 @@ export default function DashboardPage() {
   }
 
   const getPhaseMultiplier = (phase: string) => {
-    switch (phase) {
-      case 'groups': return 1
-      case 'round16': return 2
-      case 'quarterfinals': return 3
-      case 'semifinals': return 4
-      case 'final': return 5
-      case 'thirdplace': return 4
-      default: return 1
-    }
+    const phaseConfig = PHASES.find(p => p.key === phase)
+    return phaseConfig?.multiplier || 1
   }
 
   const getPhaseName = (phase: string) => {
-    switch (phase) {
-      case 'groups': return 'Fase de Grupos'
-      case 'round16': return 'Octavos'
-      case 'quarterfinals': return 'Cuartos'
-      case 'semifinals': return 'Semifinal'
-      case 'final': return 'Final'
-      case 'thirdplace': return '3er Lugar'
-      default: return phase
-    }
+    const phaseConfig = PHASES.find(p => p.key === phase)
+    return phaseConfig?.label || phase
   }
 
   const handleSavePrediction = async (matchId: string) => {
@@ -159,7 +156,9 @@ export default function DashboardPage() {
     if (prediction.awayScore === match.away_score) points += 3
     else if (Math.abs(prediction.awayScore - match.away_score) === 1) points += 1
 
-    return points
+    // Aplicar multiplicador de fase
+    const multiplier = getPhaseMultiplier(match.phase)
+    return points * multiplier
   }
 
   const handleCreateUser = async () => {
@@ -403,19 +402,19 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-text-primary">Mis Predicciones</h2>
               </div>
 
-              {/* Phase Filter */}
+              {/* Phase Filter - AHORA CON RONDA DE 32 (Dieciseisavos) */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                {['groups', 'round16', 'quarterfinals', 'semifinals', 'final', 'thirdplace'].map((phase) => (
+                {PHASES.map((phase) => (
                   <button
-                    key={phase}
-                    onClick={() => setSelectedPhase(selectedPhase === phase ? null : phase)}
+                    key={phase.key}
+                    onClick={() => setSelectedPhase(selectedPhase === phase.key ? null : phase.key)}
                     className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                      selectedPhase === phase
+                      selectedPhase === phase.key
                         ? 'bg-primary text-white'
                         : 'bg-gray-100 text-text-secondary hover:bg-primary hover:text-white'
                     }`}
                   >
-                    {getPhaseName(phase)} (x{getPhaseMultiplier(phase)})
+                    {phase.label} (x{phase.multiplier})
                   </button>
                 ))}
               </div>
@@ -440,13 +439,14 @@ export default function DashboardPage() {
                   const prediction = predictions[match.id]
                   const isEditing = editingMatch === match.id
                   const canEdit = match.status === 'upcoming'
+                  const multiplier = getPhaseMultiplier(match.phase)
 
                   return (
                     <div key={match.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded">
-                            {getPhaseName(match.phase)}
+                            {getPhaseName(match.phase)} (x{multiplier})
                           </span>
                           {match.group_name && (
                             <span className="text-xs font-medium text-text-secondary bg-gray-200 px-2 py-1 rounded">
@@ -695,17 +695,17 @@ export default function DashboardPage() {
                               </div>
                               <span className="font-medium text-text-primary">{u.username}</span>
                             </div>
-                          </td>
+                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                               u.is_admin ? 'bg-fifa-red/10 text-fifa-red' : 'bg-primary/10 text-primary'
                             }`}>
                               {u.is_admin ? 'Admin' : 'Participante'}
                             </span>
-                          </td>
+                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="font-bold text-text-primary">{u.points || 0}</span>
-                          </td>
+                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center gap-2">
                               <button
@@ -726,14 +726,14 @@ export default function DashboardPage() {
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
-                          </td>
+                           </td>
                         </tr>
                       ))}
                       {users.length === 0 && (
                         <tr>
                           <td colSpan={4} className="px-6 py-8 text-center text-text-secondary">
                             No hay usuarios registrados
-                          </td>
+                           </td>
                         </tr>
                       )}
                     </tbody>
