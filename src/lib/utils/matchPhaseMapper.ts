@@ -1,7 +1,6 @@
 // src/lib/utils/matchPhaseMapper.ts
 
 // Rangos de fechas basados en el calendario FIFA 2026
-// Extraídos del documento que me proporcionaste
 const PHASE_DATE_RANGES = {
   DIEZ_Y_SEISAVOS: {
     start: new Date('2026-06-28T00:00:00Z'),
@@ -35,10 +34,6 @@ const PHASE_DATE_RANGES = {
   }
 } as const
 
-/**
- * Corrige la fase de un partido basándose en su fecha
- * cuando la API no la proporciona correctamente
- */
 export function fixMatchPhase(match: {
   stage?: string
   phase?: string
@@ -46,7 +41,6 @@ export function fixMatchPhase(match: {
 }): string {
   const matchDate = new Date(match.utcDate)
   
-  // Comprobamos cada rango por orden (de más específico a más general)
   if (matchDate >= PHASE_DATE_RANGES.FINAL.start && matchDate <= PHASE_DATE_RANGES.FINAL.end) {
     return PHASE_DATE_RANGES.FINAL.slug
   }
@@ -66,6 +60,5 @@ export function fixMatchPhase(match: {
     return PHASE_DATE_RANGES.DIEZ_Y_SEISAVOS.slug
   }
   
-  // Si no está en ningún rango eliminatorio, es fase de grupos
   return 'groups'
 }
