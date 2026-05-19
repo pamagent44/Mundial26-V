@@ -80,13 +80,29 @@ export async function deleteUser(username: string) {
     throw new Error('No se puede eliminar el usuario admin')
   }
 
+  // Verificar que el usuario existe
+  const { data: user, error: findError } = await supabaseAdmin
+    .from('users')
+    .select('username')
+    .eq('username', username)
+    .single()
+
+  if (findError || !user) {
+    throw new Error('Usuario no encontrado')
+  }
+
+  // Eliminar el usuario (las predicciones y ranking se eliminarán automáticamente por CASCADE)
   const { error } = await supabaseAdmin
     .from('users')
     .delete()
     .eq('username', username)
 
-  if (error) throw new Error(error.message)
-  return true
+  if (error) {
+    console.error('Error eliminando usuario:', error)
+    throw new Error('Error al eliminar usuario: ' + error.message)
+  }
+
+  return { success: true, message: `Usuario ${username} eliminado correctamente` }
 }
 
 export async function resetPassword(username: string, tempPassword: string) {
@@ -303,7 +319,7 @@ export async function calculateUserPoints(userId: string) {
 
     const multipliers: Record<string, number> = {
       'groups': 1,
-      'round32': 1,      // Dieciseisavos mismo multiplicador que grupos (o ajusta si quieres x2)
+      'round32': 2,
       'round16': 2,
       'quarterfinals': 3,
       'semifinals': 4,
@@ -359,14 +375,13 @@ export async function syncMatchesFromAPI() {
     let updated = 0
 
     for (const match of matches) {
-      // ⭐ USAMOS EL MAPPER MEJORADO QUE CORRIGE POR FECHA SI ES NECESARIO ⭐
       const correctedPhase = mapPhaseWithCorrection(match)
       
       const matchData = {
         home_team: match.homeTeam?.name || 'Por definir',
         away_team: match.awayTeam?.name || 'Por definir',
         match_date: match.utcDate,
-        phase: correctedPhase,  // ← Fase corregida (dieciseisavos, octavos, etc.)
+        phase: correctedPhase,
         group_name: match.group?.replace('GROUP_', '') || null,
         home_score: match.score?.fullTime?.home,
         away_score: match.score?.fullTime?.away,
@@ -450,29 +465,193 @@ export async function updateLiveScores() {
   }
 }
 
-// ==================== FUNCIONES AUXILIARES MEJORADAS ====================
+// ==================== COPIA DE SEGURIDAD DE PREDICCIONES ====================
 
-/**
- * Mapea la fase de la API a nuestro slug interno
- * PRIORIDAD:
- * 1. Si la API ya tiene una fase eliminatoria correcta (ROUND_OF_16, QUARTER_FINALS, etc.) la usamos
- * 2. Si no, usamos el fixMatchPhase que corrige por fecha según el calendario FIFA 2026
- */
+export async function createPredictionBackup() {
+  try {
+    // Obtener todas las predicciones con datos de usuario y partidos
+    const { data: predictions, error } = await supabaseAdmin
+      .from('predictions')
+      .select(`
+        id,
+        home_score,
+        away_score,
+        points,
+        users (username),
+        matches (
+          id,
+          home_team,
+          away_team,
+          match_date,
+          phase,
+          home_score,
+          away_score,
+          status
+        )
+      `)
+
+    if (error) throw error
+
+    // Preparar datos para backup
+    const backupData = {
+      created_at: new Date().toISOString(),
+      total_predictions: predictions?.length || 0,
+      predictions: predictions?.map((p: any) => ({
+        prediction_id: p.id,
+        user_id: p.users?.username,
+        match_id: p.matches?.id,
+        home_team: p.matches?.home_team,
+        away_team: p.matches?.away_team,
+        predicted_home: p.home_score,
+        predicted_away: p.away_score,
+        actual_home: p.matches?.home_score,
+        actual_away: p.matches?.away_score,
+        points_earned: p.points,
+        match_status: p.matches?.status,
+        match_date: p.matches?.match_date,
+        phase: p.matches?.phase
+      })) || []
+    }
+
+    // Guardar backup
+    const { data: backup, error: insertError } = await supabaseAdmin
+      .from('prediction_backups')
+      .insert([{
+        backup_data: backupData,
+        backup_type: 'auto'
+      }])
+      .select()
+
+    if (insertError) throw insertError
+
+    // Limpiar backups antiguos (solo mantener últimas 3)
+    await supabaseAdmin.rpc('cleanup_old_backups')
+
+    return { 
+      success: true, 
+      backup: backup?.[0],
+      message: `Backup creado: ${backupData.total_predictions} predicciones guardadas`
+    }
+  } catch (error: any) {
+    console.error('Error creando backup:', error)
+    throw new Error('Error al crear backup: ' + error.message)
+  }
+}
+
+export async function getLatestBackup() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('prediction_backups')
+      .select('*')
+      .order('backup_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error) throw error
+    return { success: true, backup: data }
+  } catch (error: any) {
+    if (error.message?.includes('no rows')) {
+      return { success: false, message: 'No hay backups disponibles' }
+    }
+    throw new Error('Error al obtener backup: ' + error.message)
+  }
+}
+
+export async function getAllBackups() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('prediction_backups')
+      .select('*')
+      .order('backup_date', { ascending: false })
+      .limit(3)
+
+    if (error) throw error
+    return { success: true, backups: data }
+  } catch (error: any) {
+    throw new Error('Error al obtener backups: ' + error.message)
+  }
+}
+
+export async function restorePredictionBackup(backupId: number) {
+  try {
+    const { data: backup, error: fetchError } = await supabaseAdmin
+      .from('prediction_backups')
+      .select('*')
+      .eq('id', backupId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    const backupData = backup.backup_data
+    let restored = 0
+    let failed = 0
+
+    for (const pred of backupData.predictions) {
+      const { data: match } = await supabaseAdmin
+        .from('matches')
+        .select('id, status')
+        .eq('id', pred.match_id)
+        .single()
+
+      if (!match || match.status === 'finished') {
+        continue
+      }
+
+      const { error: upsertError } = await supabaseAdmin
+        .from('predictions')
+        .upsert({
+          user_id: pred.user_id,
+          match_id: pred.match_id,
+          home_score: pred.predicted_home,
+          away_score: pred.predicted_away,
+          points: 0
+        }, { onConflict: 'user_id,match_id' })
+
+      if (upsertError) {
+        failed++
+      } else {
+        restored++
+      }
+    }
+
+    return {
+      success: true,
+      restored,
+      failed,
+      message: `Restauradas ${restored} predicciones, ${failed} fallidas`
+    }
+  } catch (error: any) {
+    throw new Error('Error al restaurar backup: ' + error.message)
+  }
+}
+
+export async function scheduledBackup() {
+  'use server'
+  
+  console.log('🔄 Ejecutando backup programado...', new Date().toISOString())
+  
+  try {
+    const result = await createPredictionBackup()
+    console.log('✅ Backup completado:', result.message)
+    return result
+  } catch (error: any) {
+    console.error('❌ Error en backup programado:', error.message)
+    return { success: false, error: error.message }
+  }
+}
+
+// ==================== FUNCIONES AUXILIARES ====================
+
 function mapPhaseWithCorrection(match: any): string {
   const apiStage = match.stage
   
-  // Caso 1: La API ya nos dice explícitamente que es una fase eliminatoria
-  // Esto incluirá ROUND_OF_32, ROUND_OF_16, QUARTER_FINALS, etc. cuando lo implementen
   if (apiStage && apiStage !== 'GROUP_STAGE') {
     const directPhase = mapKnownPhase(apiStage)
     if (directPhase !== 'groups') {
-      // Si la API ya sabe que no es fase de grupos, usamos lo que diga
       return directPhase
     }
   }
   
-  // Caso 2: La API dice GROUP_STAGE o no tiene fase clara
-  // Usamos nuestro mapper basado en fechas del calendario FIFA 2026
   return fixMatchPhase({
     stage: apiStage,
     phase: match.phase,
@@ -480,15 +659,11 @@ function mapPhaseWithCorrection(match: any): string {
   })
 }
 
-/**
- * Mapea las fases conocidas de football-data.org a nuestros slugs
- * Incluye ROUND_OF_32 para cuando la API lo implemente
- */
 function mapKnownPhase(stage: string): string {
   const phaseMap: Record<string, string> = {
     'GROUP_STAGE': 'groups',
-    'ROUND_OF_32': 'round32',      // Dieciseisavos (cuando lo añadan)
-    'ROUND_OF_16': 'round16',      // Octavos
+    'ROUND_OF_32': 'round32',
+    'ROUND_OF_16': 'round16',
     'QUARTER_FINALS': 'quarterfinals',
     'SEMI_FINALS': 'semifinals',
     'FINAL': 'final',
@@ -497,7 +672,6 @@ function mapKnownPhase(stage: string): string {
   return phaseMap[stage] || 'groups'
 }
 
-// Mantenemos la función antigua por compatibilidad (aunque ya no se usa directamente)
 function mapPhase(stage: string): string {
   return mapKnownPhase(stage)
 }
