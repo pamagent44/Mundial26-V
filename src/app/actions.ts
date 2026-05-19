@@ -58,6 +58,7 @@ export async function getUsers() {
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('*')
+    .neq('username', 'admin')  // ← FILTRA: EXCLUYE al usuario 'admin'
     .order('points', { ascending: false })
 
   if (error) throw new Error(error.message)
