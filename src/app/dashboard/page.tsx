@@ -40,6 +40,7 @@ interface UserData {
   points: number
   is_admin: boolean
   must_change_password: boolean
+  password: string
 }
 
 // Definición de fases para el Mundial 2026 (48 equipos)
