@@ -65,6 +65,10 @@ export async function getUsers() {
 }
 
 export async function updatePassword(username: string, newPassword: string) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('La contraseña debe tener al menos 6 caracteres')
+  }
+
   const { data, error } = await supabaseAdmin
     .from('users')
     .update({ password: newPassword, must_change_password: false })
@@ -106,6 +110,10 @@ export async function deleteUser(username: string) {
 }
 
 export async function resetPassword(username: string, tempPassword: string) {
+  if (!tempPassword || tempPassword.length < 6) {
+    throw new Error('La contraseña debe tener al menos 6 caracteres')
+  }
+
   const { data, error } = await supabaseAdmin
     .from('users')
     .update({ password: tempPassword, must_change_password: true })
@@ -469,7 +477,6 @@ export async function updateLiveScores() {
 
 export async function createPredictionBackup() {
   try {
-    // Obtener todas las predicciones con datos de usuario y partidos
     const { data: predictions, error } = await supabaseAdmin
       .from('predictions')
       .select(`
@@ -492,7 +499,6 @@ export async function createPredictionBackup() {
 
     if (error) throw error
 
-    // Preparar datos para backup
     const backupData = {
       created_at: new Date().toISOString(),
       total_predictions: predictions?.length || 0,
@@ -513,7 +519,6 @@ export async function createPredictionBackup() {
       })) || []
     }
 
-    // Guardar backup
     const { data: backup, error: insertError } = await supabaseAdmin
       .from('prediction_backups')
       .insert([{
@@ -524,7 +529,6 @@ export async function createPredictionBackup() {
 
     if (insertError) throw insertError
 
-    // Limpiar backups antiguos (solo mantener últimas 3)
     await supabaseAdmin.rpc('cleanup_old_backups')
 
     return { 
