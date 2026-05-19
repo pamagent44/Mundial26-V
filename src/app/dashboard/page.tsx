@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { 
   createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
-  deleteUser, createPredictionBackup, getLatestBackup
+  deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword
 } from '@/app/actions'
 
 // Types
@@ -75,6 +75,17 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   
+  // Reset password state
+  const [showResetModal, setShowResetModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState('')
+  const [newTempPassword, setNewTempPassword] = useState('')
+
+  // Change own password state
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPasswordAdmin, setNewPasswordAdmin] = useState('')
+  const [confirmPasswordAdmin, setConfirmPasswordAdmin] = useState('')
+ 
   // Backup state
   const [downloading, setDownloading] = useState(false)
   const [backupInfo, setBackupInfo] = useState<{ date: string; count: number } | null>(null)
@@ -231,8 +242,77 @@ export default function DashboardPage() {
     }
   }
 
-  const handleResetPassword = async (username: string) => {
-    setUserError('Función no implementada en Supabase aún')
+  const handleResetPassword = (username: string) => {
+    setSelectedUser(username)
+    setNewTempPassword('')
+    setShowResetModal(true)
+  }
+
+  const handleConfirmResetPassword = async () => {
+    if (!newTempPassword || newTempPassword.length < 6) {
+      setUserError('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+    
+    setSyncing(true)
+    try {
+      await resetPassword(selectedUser, newTempPassword)
+      setUserCreated(true)
+      setSyncMessage(`✅ Contraseña reseteada para ${selectedUser}`)
+      setTimeout(() => {
+        setUserCreated(false)
+        setSyncMessage('')
+      }, 3000)
+      setShowResetModal(false)
+      setNewTempPassword('')
+    } catch (err: any) {
+      setUserError(err.message || 'Error reseteando contraseña')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleChangeOwnPassword = async () => {
+    if (!currentPassword) {
+      setUserError('Debes ingresar tu contraseña actual')
+      return
+    }
+    
+    if (!newPasswordAdmin || newPasswordAdmin.length < 6) {
+      setUserError('La nueva contraseña debe tener al menos 6 caracteres')
+      return
+    }
+    
+    if (newPasswordAdmin !== confirmPasswordAdmin) {
+      setUserError('Las contraseñas nuevas no coinciden')
+      return
+    }
+    
+    if (currentPassword !== currentUser?.password) {
+      setUserError('Contraseña actual incorrecta')
+      return
+    }
+    
+    setSyncing(true)
+    try {
+      await updatePassword(currentUser!.username, newPasswordAdmin)
+      
+      const updatedUser = { ...currentUser, password: newPasswordAdmin, must_change_password: false }
+      localStorage.setItem('user', JSON.stringify(updatedUser))
+      setCurrentUser(updatedUser)
+      
+      setSyncMessage('✅ Tu contraseña ha sido actualizada correctamente')
+      setShowChangePasswordModal(false)
+      setCurrentPassword('')
+      setNewPasswordAdmin('')
+      setConfirmPasswordAdmin('')
+      
+      setTimeout(() => setSyncMessage(''), 3000)
+    } catch (err: any) {
+      setUserError(err.message || 'Error cambiando contraseña')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const handleSyncMatches = async () => {
@@ -751,6 +831,21 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Cambiar mi propia contraseña */}
+              <div className="bg-gray-50 rounded-xl p-4 mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-text-primary">Mi Contraseña</h3>
+                  <p className="text-sm text-text-secondary">Cambia tu contraseña de administrador</p>
+                </div>
+                <button
+                  onClick={() => setShowChangePasswordModal(true)}
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors flex items-center gap-2"
+                >
+                  <Edit3 className="w-4 h-4" />
+                  Cambiar Contraseña
+                </button>
+              </div>
+
               {/* Create User */}
               <div className="bg-fifa-blue/5 border border-fifa-blue/20 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -846,18 +941,30 @@ export default function DashboardPage() {
                             <span className="font-bold text-text-primary">{u.points || 0}</span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <button
-                              onClick={() => handleDeleteUser(u.username)}
-                              className={`p-2 transition-colors ${
-                                u.username === 'admin' 
-                                  ? 'text-gray-300 cursor-not-allowed' 
-                                  : 'text-red-600 hover:text-red-800'
-                              }`}
-                              title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
-                              disabled={u.username === 'admin'}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleResetPassword(u.username)}
+                                className="p-2 text-blue-600 hover:text-blue-800 transition-colors"
+                                title={`Resetear contraseña de ${u.username}`}
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              
+                              {u.username !== currentUser?.username && (
+                                <button
+                                  onClick={() => handleDeleteUser(u.username)}
+                                  className={`p-2 transition-colors ${
+                                    u.username === 'admin' 
+                                      ? 'text-gray-300 cursor-not-allowed' 
+                                      : 'text-red-600 hover:text-red-800'
+                                  }`}
+                                  title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
+                                  disabled={u.username === 'admin'}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -877,7 +984,112 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* Modal de confirmación de backup - ANTES del Footer */}
+      {/* Modal para resetear contraseña */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+            <h3 className="text-lg font-bold mb-4">Resetear Contraseña</h3>
+            <p className="text-text-secondary mb-4">
+              Usuario: <span className="font-semibold">{selectedUser}</span>
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text-primary mb-2">
+                Nueva Contraseña Temporal
+              </label>
+              <input
+                type="password"
+                value={newTempPassword}
+                onChange={(e) => setNewTempPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowResetModal(false)
+                  setNewTempPassword('')
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmResetPassword}
+                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
+              >
+                Resetear Contraseña
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para cambiar propia contraseña */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+            <h3 className="text-lg font-bold mb-4">Cambiar mi Contraseña</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text-primary mb-2">
+                Contraseña Actual
+              </label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                placeholder="Tu contraseña actual"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text-primary mb-2">
+                Nueva Contraseña
+              </label>
+              <input
+                type="password"
+                value={newPasswordAdmin}
+                onChange={(e) => setNewPasswordAdmin(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text-primary mb-2">
+                Confirmar Nueva Contraseña
+              </label>
+              <input
+                type="password"
+                value={confirmPasswordAdmin}
+                onChange={(e) => setConfirmPasswordAdmin(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                placeholder="Repite la nueva contraseña"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowChangePasswordModal(false)
+                  setCurrentPassword('')
+                  setNewPasswordAdmin('')
+                  setConfirmPasswordAdmin('')
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleChangeOwnPassword}
+                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
+              >
+                Cambiar Contraseña
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación de backup */}
       {showBackupConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-md mx-4">
