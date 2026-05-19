@@ -8,9 +8,12 @@ import { useRouter } from 'next/navigation'
 import {
   Trophy, Clock, Users, Shield, Calendar, Star,
   CheckCircle, XCircle, AlertCircle, Edit3, Save, Eye, EyeOff, Play, Pause,
-  UserPlus, UserCheck, Trash2
+  UserPlus, UserCheck, Trash2, Download, RefreshCw, Database
 } from 'lucide-react'
-import { createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI } from '@/app/actions'
+import { 
+  createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
+  deleteUser, createPredictionBackup, getLatestBackup
+} from '@/app/actions'
 
 // Types
 interface Match {
@@ -42,7 +45,7 @@ interface UserData {
 // Definición de fases para el Mundial 2026 (48 equipos)
 const PHASES = [
   { key: 'groups', label: 'Fase de Grupos', multiplier: 1 },
-  { key: 'round32', label: 'Ronda de 32', multiplier: 2 },      // ← NUEVO: Dieciseisavos (x2)
+  { key: 'round32', label: 'Ronda de 32', multiplier: 2 },
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
@@ -71,6 +74,11 @@ export default function DashboardPage() {
   const [userError, setUserError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  
+  // Backup state
+  const [downloading, setDownloading] = useState(false)
+  const [backupInfo, setBackupInfo] = useState<{ date: string; count: number } | null>(null)
+  const [showBackupConfirm, setShowBackupConfirm] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -88,6 +96,12 @@ export default function DashboardPage() {
 
     loadData(parsedUser.username)
   }, [router])
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadBackupInfo()
+    }
+  }, [isAdmin])
 
   const loadData = async (username: string) => {
     try {
@@ -156,7 +170,6 @@ export default function DashboardPage() {
     if (prediction.awayScore === match.away_score) points += 3
     else if (Math.abs(prediction.awayScore - match.away_score) === 1) points += 1
 
-    // Aplicar multiplicador de fase
     const multiplier = getPhaseMultiplier(match.phase)
     return points * multiplier
   }
@@ -195,20 +208,31 @@ export default function DashboardPage() {
       setUserError('No se puede eliminar el usuario admin')
       return
     }
-    setUserError('Función no implementada en Supabase aún')
+    
+    if (!confirm(`¿Estás seguro de que quieres eliminar al usuario "${username}"? Se eliminarán todas sus predicciones.`)) {
+      return
+    }
+    
+    setUserError('')
+    setSyncing(true)
+    
+    try {
+      await deleteUser(username)
+      
+      const usersData = await getUsers()
+      setUsers(usersData || [])
+      
+      setUserCreated(true)
+      setTimeout(() => setUserCreated(false), 3000)
+    } catch (err: any) {
+      setUserError(err.message || 'Error eliminando usuario')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const handleResetPassword = async (username: string) => {
     setUserError('Función no implementada en Supabase aún')
-  }
-
-  const handleResetAdminPassword = () => {
-    const tempPassword = prompt('Introduce la nueva contraseña para admin:')
-    if (tempPassword && tempPassword.length >= 6) {
-      alert('Función no implementada en Supabase aún. Usa Supabase Dashboard.')
-    } else {
-      alert('La contraseña debe tener al menos 6 caracteres')
-    }
   }
 
   const handleSyncMatches = async () => {
@@ -223,6 +247,70 @@ export default function DashboardPage() {
       setSyncMessage('❌ ' + err.message)
     } finally {
       setSyncing(false)
+      setTimeout(() => setSyncMessage(''), 5000)
+    }
+  }
+
+  // Backup functions
+  const handleCreateBackup = async () => {
+    setShowBackupConfirm(false)
+    setSyncing(true)
+    try {
+      const result = await createPredictionBackup()
+      if (result.success) {
+        setSyncMessage(`✅ ${result.message}`)
+        await loadBackupInfo()
+      } else {
+        setSyncMessage('❌ Error al crear backup')
+      }
+    } catch (err: any) {
+      setSyncMessage('❌ ' + err.message)
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMessage(''), 5000)
+    }
+  }
+
+  const loadBackupInfo = async () => {
+    try {
+      const result = await getLatestBackup()
+      if (result.success && result.backup) {
+        const backupData = result.backup.backup_data
+        setBackupInfo({
+          date: new Date(result.backup.backup_date).toLocaleString(),
+          count: backupData.total_predictions || backupData.predictions?.length || 0
+        })
+      }
+    } catch (err) {
+      console.error('Error cargando info backup:', err)
+    }
+  }
+
+  const handleDownloadBackup = async () => {
+    setDownloading(true)
+    try {
+      const result = await getLatestBackup()
+      if (result.success && result.backup) {
+        const backupData = result.backup.backup_data
+        const jsonStr = JSON.stringify(backupData, null, 2)
+        const blob = new Blob([jsonStr], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `backup_predicciones_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        setSyncMessage('✅ Backup descargado correctamente')
+      } else {
+        setSyncMessage('❌ No hay backups disponibles para descargar')
+      }
+    } catch (err: any) {
+      setSyncMessage('❌ ' + err.message)
+    } finally {
+      setDownloading(false)
+      setTimeout(() => setSyncMessage(''), 5000)
     }
   }
 
@@ -402,7 +490,7 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-text-primary">Mis Predicciones</h2>
               </div>
 
-              {/* Phase Filter - AHORA CON RONDA DE 32 (Dieciseisavos) */}
+              {/* Phase Filter */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
                 {PHASES.map((phase) => (
                   <button
@@ -612,6 +700,57 @@ export default function DashboardPage() {
                 </button>
               </div>
 
+              {/* Backup Section */}
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-6 mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Database className="w-5 h-5 text-primary" />
+                  <h3 className="font-semibold text-text-primary">Copia de Seguridad</h3>
+                </div>
+                <p className="text-sm text-text-secondary mb-4">
+                  Las copias se realizan automáticamente todos los días a las 23:30. Se mantienen las últimas 3 copias.
+                </p>
+                
+                {backupInfo && (
+                  <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
+                    <p className="text-text-secondary">
+                      <span className="font-medium">Última copia:</span> {backupInfo.date} | 
+                      <span className="font-medium ml-2">{backupInfo.count} predicciones</span>
+                    </p>
+                  </div>
+                )}
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleDownloadBackup}
+                    disabled={downloading}
+                    className="flex-1 bg-primary hover:bg-fifa-blue text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {downloading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Descargando...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Descargar Última Copia
+                      </>
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={() => setShowBackupConfirm(true)}
+                    className="flex-1 bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Crear Copia Ahora
+                  </button>
+                </div>
+              </div>
+
               {/* Create User */}
               <div className="bg-fifa-blue/5 border border-fifa-blue/20 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -695,45 +834,38 @@ export default function DashboardPage() {
                               </div>
                               <span className="font-medium text-text-primary">{u.username}</span>
                             </div>
-                           </td>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                               u.is_admin ? 'bg-fifa-red/10 text-fifa-red' : 'bg-primary/10 text-primary'
                             }`}>
                               {u.is_admin ? 'Admin' : 'Participante'}
                             </span>
-                           </td>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="font-bold text-text-primary">{u.points || 0}</span>
-                           </td>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleResetPassword(u.username)}
-                                className="p-2 text-text-secondary hover:text-primary transition-colors"
-                                title="Resetear contraseña"
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(u.username)}
-                                className={`p-2 transition-colors ${
-                                  u.username === 'admin' ? 'text-gray-300 cursor-not-allowed' : 'text-text-secondary hover:text-fifa-red'
-                                }`}
-                                title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
-                                disabled={u.username === 'admin'}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                           </td>
+                            <button
+                              onClick={() => handleDeleteUser(u.username)}
+                              className={`p-2 transition-colors ${
+                                u.username === 'admin' 
+                                  ? 'text-gray-300 cursor-not-allowed' 
+                                  : 'text-red-600 hover:text-red-800'
+                              }`}
+                              title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
+                              disabled={u.username === 'admin'}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                       {users.length === 0 && (
                         <tr>
                           <td colSpan={4} className="px-6 py-8 text-center text-text-secondary">
                             No hay usuarios registrados
-                           </td>
+                          </td>
                         </tr>
                       )}
                     </tbody>
@@ -744,6 +876,32 @@ export default function DashboardPage() {
           )}
         </div>
       </main>
+
+      {/* Modal de confirmación de backup - ANTES del Footer */}
+      {showBackupConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+            <h3 className="text-lg font-bold mb-4">Confirmar Backup Manual</h3>
+            <p className="text-text-secondary mb-6">
+              ¿Deseas crear una copia de seguridad manual? Se guardará junto con las automáticas.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowBackupConfirm(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateBackup}
+                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
+              >
+                Crear Backup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>
