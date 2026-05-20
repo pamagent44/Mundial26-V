@@ -175,7 +175,7 @@ export async function updateMatchResult(
 
   if (error) throw new Error(error.message)
 
-  // AUTOMATIZACIÓN: Recalcular puntos de todos los usuarios al cambiar manualmente un resultado
+  // Recalcular de forma automática tras modificar un partido
   await recalculateAllRankings()
 
   return data
@@ -266,7 +266,6 @@ export async function getAllPredictions() {
   return data
 }
 
-// Fechas de inicio de cada fase (cuando las predicciones de otros usuarios se hacen visibles)
 const PHASE_REVEAL_DATES: Record<string, string> = {
   groups:        '2026-06-11T00:00:00Z',
   Dieciseisavos: '2026-06-28T00:00:00Z',
@@ -277,9 +276,6 @@ const PHASE_REVEAL_DATES: Record<string, string> = {
   final:         '2026-07-19T00:00:00Z',
 }
 
-/**
- * Devuelve las predicciones visibles para un usuario en una fase concreta.
- */
 export async function getVisiblePredictionsForPhase(requestingUser: string, phase: string) {
   const { data: userData } = await supabaseAdmin
     .from('users')
@@ -350,9 +346,6 @@ export async function updateRanking(userId: string, totalPoints: number, predict
   return data
 }
 
-/**
- * NUEVA ACCIÓN GLOBAL: Itera sobre todos los usuarios registrados y actualiza sus puntuaciones.
- */
 export async function recalculateAllRankings() {
   try {
     const { data: allUsers, error } = await supabaseAdmin
@@ -386,27 +379,46 @@ export async function calculateUserPoints(userId: string) {
 
   let totalPoints = 0
 
+  // Mapeo secuencial para calcular la distancia de saltos del 1X2 (1 = Local, 2 = Empate, 3 = Visitante)
+  const signValueMap: Record<string, number> = {
+    'home': 1,
+    'draw': 2,
+    'away': 3
+  }
+
   for (const pred of predictions) {
     const match = pred.matches
     
-    // 🔍 COMPROBACIÓN MEJORADA PARA PRUEBAS:
-    // Si el partido no existe, o no tiene los goles definidos en la DB, se salta.
-    // Esto permite que computes puntos en tus pruebas aunque te olvides de cambiar el 'status' a 'finished'.
+    // Permitir cálculo en pruebas si hay datos de puntuación
     if (!match || match.home_score === null || match.away_score === null) continue
 
     let points = 0
 
+    // 1. Determinar el signo real y el signo predicho
     const actualResult = match.home_score > match.away_score ? 'home' :
                          match.home_score < match.away_score ? 'away' : 'draw'
     const predictedResult = pred.home_score > pred.away_score ? 'home' :
                            pred.home_score < pred.away_score ? 'away' : 'draw'
 
-    if (actualResult === predictedResult) points += 5
+    // 2. Calcular la distancia de saltos en base a la quiniela (1 - X - 2)
+    const actualVal = signValueMap[actualResult]
+    const predictedVal = signValueMap[predictedResult]
+    const jumpDistance = Math.abs(actualVal - predictedVal)
+
+    if (jumpDistance === 0) {
+      points += 5 // Resultado Exacto (1X2)
+    } else if (jumpDistance === 1) {
+      points += 2 // CORREGIDO: Cercano al Resultado (1X2) -> Exactamente 1 salto de distancia
+    }
+
+    // 3. Reglas de goles por equipo (Se mantienen intactas sin tocar)
     if (pred.home_score === match.home_score) points += 3
     else if (Math.abs(pred.home_score - match.home_score) === 1) points += 1
+
     if (pred.away_score === match.away_score) points += 3
     else if (Math.abs(pred.away_score - match.away_score) === 1) points += 1
 
+    // 4. Multiplicadores por fase
     const multipliers: Record<string, number> = {
       'groups': 1,
       'Dieciseisavos': 2,
@@ -500,7 +512,6 @@ export async function syncMatchesFromAPI() {
       }
     }
 
-    // AUTOMATIZACIÓN: Si hubo cambios o partidos nuevos finalizados, recalcular todo el pool
     if (inserted > 0 || updated > 0) {
       await recalculateAllRankings()
     }
@@ -554,7 +565,6 @@ export async function updateLiveScores() {
       }
     }
 
-    // AUTOMATIZACIÓN: Recalcular puntos tras actualizar partidos en vivo o terminados
     if (matches.length > 0) {
       await recalculateAllRankings()
     }
