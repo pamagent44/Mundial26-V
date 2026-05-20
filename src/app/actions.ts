@@ -262,6 +262,58 @@ export async function getAllPredictions() {
   return data
 }
 
+// Fechas de inicio de cada fase (cuando las predicciones de otros usuarios se hacen visibles)
+const PHASE_REVEAL_DATES: Record<string, string> = {
+  groups:        '2026-06-11T00:00:00Z',
+  Dieciseisavos: '2026-06-28T00:00:00Z', // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  round16:       '2026-07-04T00:00:00Z',
+  quarterfinals: '2026-07-09T00:00:00Z',
+  semifinals:    '2026-07-14T00:00:00Z',
+  thirdplace:    '2026-07-18T00:00:00Z',
+  final:         '2026-07-19T00:00:00Z',
+}
+
+/**
+ * Devuelve las predicciones visibles para un usuario en una fase concreta.
+ */
+export async function getVisiblePredictionsForPhase(requestingUser: string, phase: string) {
+  const { data: userData } = await supabaseAdmin
+    .from('users')
+    .select('is_admin')
+    .eq('username', requestingUser)
+    .single()
+
+  const isAdmin = userData?.is_admin ?? false
+
+  const revealDate = PHASE_REVEAL_DATES[phase]
+  const phaseVisible = !revealDate || new Date() >= new Date(revealDate)
+
+  let query = supabaseAdmin
+    .from('predictions')
+    .select(`
+      *,
+      users (username),
+      matches!inner (
+        id, home_team, away_team, match_date, phase,
+        home_score, away_score, status
+      )
+    `)
+    .eq('matches.phase', phase)
+
+  if (!phaseVisible && !isAdmin) {
+    query = query.eq('user_id', requestingUser)
+  }
+
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+
+  return {
+    data,
+    phaseVisible,
+    revealDate: revealDate ?? null,
+  }
+}
+
 // ==================== RANKING ====================
 
 export async function getRankings() {
@@ -326,7 +378,7 @@ export async function calculateUserPoints(userId: string) {
 
     const multipliers: Record<string, number> = {
       'groups': 1,
-      'round32': 2,
+      'Dieciseisavos': 2, // ← CAMBIADO: 'round32' por 'Dieciseisavos'
       'round16': 2,
       'quarterfinals': 3,
       'semifinals': 4,
@@ -665,7 +717,7 @@ function mapPhaseWithCorrection(match: any): string {
 function mapKnownPhase(stage: string): string {
   const phaseMap: Record<string, string> = {
     'GROUP_STAGE': 'groups',
-    'ROUND_OF_32': 'round32',
+    'ROUND_OF_32': 'Dieciseisavos', // ← CAMBIADO: 'round32' por 'Dieciseisavos'
     'ROUND_OF_16': 'round16',
     'QUARTER_FINALS': 'quarterfinals',
     'SEMI_FINALS': 'semifinals',
