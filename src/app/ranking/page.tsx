@@ -32,10 +32,22 @@ interface Prediction {
   matches?: Match
 }
 
+// Fechas de inicio de cada fase para control de visibilidad en el ranking
+const PHASE_START_DATES: Record<string, Date> = {
+  groups:        new Date('2026-06-11T00:00:00Z'),
+  Dieciseisavos: new Date('2026-06-28T00:00:00Z'),
+  round16:       new Date('2026-07-04T00:00:00Z'),
+  quarterfinals: new Date('2026-07-09T00:00:00Z'),
+  semifinals:    new Date('2026-07-14T00:00:00Z'),
+  thirdplace:    new Date('2026-07-18T00:00:00Z'),
+  final:         new Date('2026-07-19T00:00:00Z'),
+}
+
 export default function RankingPage() {
   const [sortBy, setSortBy] = useState<'points' | 'predictions'>('points')
   const [mounted, setMounted] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [currentUser, setCurrentUser] = useState<{ username: string; isAdmin: boolean } | null>(null)
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
   const [users, setUsers] = useState<RankingUser[]>([])
   const [predictions, setPredictions] = useState<Prediction[]>([])
@@ -47,6 +59,20 @@ export default function RankingPage() {
     setMounted(true)
     const token = localStorage.getItem('auth_token')
     setIsLoggedIn(!!token)
+    
+    // Cargar datos del usuario logueado para validar permisos de privacidad
+    const userData = localStorage.getItem('user')
+    if (userData) {
+      try {
+        const parsed = JSON.parse(userData)
+        setCurrentUser({
+          username: parsed.username,
+          isAdmin: parsed.isAdmin || parsed.is_admin || false
+        })
+      } catch (e) {
+        console.error('Error parseando sesión de usuario:', e)
+      }
+    }
     loadData()
   }, [])
 
@@ -304,23 +330,38 @@ export default function RankingPage() {
                     <div className="bg-gray-50 rounded-lg p-4">
                       <p className="text-sm text-text-secondary mb-2">Predicciones realizadas</p>
                       <div className="mt-2 space-y-2">
-                        {selectedUserPredictions.map((pred, idx) => (
-                          <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-200 last:border-0">
-                            <span className="text-text-primary">
-                              {pred.matches?.home_team || 'Equipo A'} vs {pred.matches?.away_team || 'Equipo B'}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-primary">
-                                {pred.home_score} - {pred.away_score}
-                              </span>
-                              {pred.points !== undefined && pred.points > 0 && (
-                                <span className="text-xs bg-fifa-green text-white px-2 py-0.5 rounded">
-                                  +{pred.points} pts
+                        {selectedUserPredictions.map((pred, idx) => {
+                          const phaseKey = pred.matches?.phase || 'groups'
+                          const phaseStartDate = PHASE_START_DATES[phaseKey]
+                          
+                          // Condición de visibilidad: si la fase ya empezó OR es admin OR está viendo su propia predicción
+                          const isVisible = !phaseStartDate || new Date() >= phaseStartDate || currentUser?.isAdmin || currentUser?.username === selectedUser
+
+                          return (
+                            <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-200 last:border-0">
+                              <div className="flex flex-col">
+                                <span className="text-text-primary font-medium">
+                                  {pred.matches?.home_team || 'Equipo A'} vs {pred.matches?.away_team || 'Equipo B'}
                                 </span>
-                              )}
+                                {!isVisible && (
+                                  <span className="text-xs text-amber-600 font-semibold flex items-center gap-1 mt-0.5">
+                                    🔒 Bloqueado hasta el {phaseStartDate?.toLocaleDateString('es-ES')}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xl text-primary tracking-wider">
+                                  {isVisible ? `${pred.home_score} - ${pred.away_score}` : '🔒 - 🔒'}
+                                </span>
+                                {isVisible && pred.points !== undefined && pred.points > 0 && (
+                                  <span className="text-xs bg-fifa-green text-white px-2 py-0.5 rounded">
+                                    +{pred.points} pts
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )}
