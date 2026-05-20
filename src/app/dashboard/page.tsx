@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { 
   createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
-  deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword
+  deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword,
+  recalculateAllRankings // ← IMPORTADO: La nueva acción global del backend
 } from '@/app/actions'
 
 // Types
@@ -46,7 +47,7 @@ interface UserData {
 // Definición de fases para el Mundial 2026 (48 equipos)
 const PHASES = [
   { key: 'groups', label: 'Fase de Grupos', multiplier: 1 },
-  { key: 'Dieciseisavos', label: 'Dieciseisavos', multiplier: 2 }, // ← CAMBIADO: key de 'round32' a 'Dieciseisavos'
+  { key: 'Dieciseisavos', label: 'Dieciseisavos', multiplier: 2 },
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
@@ -55,10 +56,9 @@ const PHASES = [
 ]
 
 // Fechas de inicio de cada fase (cuando se abren las predicciones de otros usuarios)
-// Hasta esa fecha, cada usuario solo ve sus propias predicciones
 const PHASE_START_DATES: Record<string, Date> = {
   groups:        new Date('2026-06-11T00:00:00Z'),
-  Dieciseisavos: new Date('2026-06-28T00:00:00Z'), // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  Dieciseisavos: new Date('2026-06-28T00:00:00Z'),
   round16:       new Date('2026-07-04T00:00:00Z'),
   quarterfinals: new Date('2026-07-09T00:00:00Z'),
   semifinals:    new Date('2026-07-14T00:00:00Z'),
@@ -66,10 +66,10 @@ const PHASE_START_DATES: Record<string, Date> = {
   final:         new Date('2026-07-19T00:00:00Z'),
 }
 
-// Rangos de fechas de partidos por fase (para filtrar correctamente independiente del campo `phase` de la API)
+// Rangos de fechas de partidos por fase
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-27T23:59:59Z') },
-  Dieciseisavos: { start: new Date('2026-06-28T00:00:00Z'), end: new Date('2026-07-03T23:59:59Z') }, // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  Dieciseisavos: { start: new Date('2026-06-28T00:00:00Z'), end: new Date('2026-07-03T23:59:59Z') },
   round16:       { start: new Date('2026-07-04T00:00:00Z'), end: new Date('2026-07-07T23:59:59Z') },
   quarterfinals: { start: new Date('2026-07-09T00:00:00Z'), end: new Date('2026-07-11T23:59:59Z') },
   semifinals:    { start: new Date('2026-07-14T00:00:00Z'), end: new Date('2026-07-15T23:59:59Z') },
@@ -77,15 +77,12 @@ const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   final:         { start: new Date('2026-07-19T00:00:00Z'), end: new Date('2026-07-19T23:59:59Z') },
 }
 
-// Devuelve true si la fase ya ha comenzado (las predicciones de otros usuarios son visibles)
 function isPhaseVisible(phaseKey: string): boolean {
   const startDate = PHASE_START_DATES[phaseKey]
-  if (!startDate) return true // si no hay fecha definida, se muestra
+  if (!startDate) return true
   return new Date() >= startDate
 }
 
-// Filtra partidos por fase usando rangos de fechas como fuente de verdad
-// Esto evita dependencia del campo `phase` de la API que puede venir mal
 function matchBelongsToPhase(match: Match, phaseKey: string): boolean {
   const range = PHASE_DATE_RANGES[phaseKey]
   if (!range) return match.phase === phaseKey
@@ -114,6 +111,10 @@ export default function DashboardPage() {
   const [userError, setUserError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+
+  // Nuevo estado para el botón Calcular
+  const [calculating, setCalculating] = useState(false)
+  const [calcMessage, setCalcMessage] = useState('')
   
   // Reset password state
   const [showResetModal, setShowResetModal] = useState(false)
@@ -363,11 +364,34 @@ export default function DashboardPage() {
       setSyncMessage(`✅ ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
       const matchesData = await getMatches()
       setMatches(matchesData || [])
+      
+      // Actualizar ranking local tras sync
+      const usersData = await getUsers()
+      setUsers(usersData || [])
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
       setSyncing(false)
       setTimeout(() => setSyncMessage(''), 5000)
+    }
+  }
+
+  // Nueva función disparadora para el botón Calcular
+  const handleRecalculateAllRankings = async () => {
+    setCalculating(true)
+    setCalcMessage('')
+    try {
+      const result = await recalculateAllRankings()
+      setCalcMessage(`✅ ${result.message}`)
+      
+      // Volver a pedir la lista de usuarios actualizada para refrescar la UI (Top 3 e histórico)
+      const usersData = await getUsers()
+      setUsers(usersData || [])
+    } catch (err: any) {
+      setCalcMessage('❌ Error calculando puntos: ' + err.message)
+    } finally {
+      setCalculating(false)
+      setTimeout(() => setCalcMessage(''), 5000)
     }
   }
 
@@ -810,40 +834,85 @@ export default function DashboardPage() {
                 <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
               </div>
 
-              {/* Sync Matches */}
-              <div className="bg-fifa-green/5 border border-fifa-green/20 rounded-xl p-6 mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Calendar className="w-5 h-5 text-fifa-green" />
-                  <h3 className="font-semibold text-text-primary">Sincronizar Partidos</h3>
-                </div>
-                <p className="text-sm text-text-secondary mb-4">
-                  Descarga los partidos oficiales del Mundial 2026 desde football-data.org
-                </p>
-                {syncMessage && (
-                  <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                    {syncMessage}
+              {/* Grid para acomodar las acciones principales */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                
+                {/* Sincronizar Partidos */}
+                <div className="bg-fifa-green/5 border border-fifa-green/20 rounded-xl p-6 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Calendar className="w-5 h-5 text-fifa-green" />
+                      <h3 className="font-semibold text-text-primary">Sincronizar Partidos</h3>
+                    </div>
+                    <p className="text-sm text-text-secondary mb-4">
+                      Descarga los partidos oficiales del Mundial 2026 desde football-data.org
+                    </p>
+                    {syncMessage && (
+                      <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                        {syncMessage}
+                      </div>
+                    )}
                   </div>
-                )}
-                <button
-                  onClick={handleSyncMatches}
-                  disabled={syncing}
-                  className="w-full bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {syncing ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Sincronizando...
-                    </>
-                  ) : (
-                    <>
-                      <Calendar className="w-4 h-4" />
-                      Sincronizar Partidos Mundial 2026
-                    </>
-                  )}
-                </button>
+                  <button
+                    onClick={handleSyncMatches}
+                    disabled={syncing}
+                    className="w-full bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {syncing ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Sincronizando...
+                      </>
+                    ) : (
+                      <>
+                        <Calendar className="w-4 h-4" />
+                        Sincronizar Partidos
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* NUEVA SECCIÓN: Recalcular Puntos Manualmente */}
+                <div className="bg-accent/5 border border-accent/20 rounded-xl p-6 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Trophy className="w-5 h-5 text-accent" />
+                      <h3 className="font-semibold text-text-primary">Calcular Puntos Manual</h3>
+                    </div>
+                    <p className="text-sm text-text-secondary mb-4">
+                      Fuerza el cálculo inmediato de las puntuaciones y actualiza los rankings generales de todos los usuarios.
+                    </p>
+                    {calcMessage && (
+                      <div className={`px-4 py-3 rounded-lg mb-4 ${calcMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                        {calcMessage}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleRecalculateAllRankings}
+                    disabled={calculating}
+                    className="w-full bg-accent hover:bg-yellow-600 text-text-primary font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {calculating ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-text-primary" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Calculando marcadores...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        Calcular Puntos y Rankings
+                      </>
+                    )}
+                  </button>
+                </div>
+
               </div>
 
               {/* Backup Section */}
