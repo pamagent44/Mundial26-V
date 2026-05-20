@@ -388,7 +388,11 @@ export async function calculateUserPoints(userId: string) {
 
   for (const pred of predictions) {
     const match = pred.matches
-    if (!match || match.status !== 'finished') continue
+    
+    // 🔍 COMPROBACIÓN MEJORADA PARA PRUEBAS:
+    // Si el partido no existe, o no tiene los goles definidos en la DB, se salta.
+    // Esto permite que computes puntos en tus pruebas aunque te olvides de cambiar el 'status' a 'finished'.
+    if (!match || match.home_score === null || match.away_score === null) continue
 
     let points = 0
 
