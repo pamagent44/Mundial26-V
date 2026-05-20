@@ -174,6 +174,10 @@ export async function updateMatchResult(
     .select()
 
   if (error) throw new Error(error.message)
+
+  // AUTOMATIZACIÓN: Recalcular puntos de todos los usuarios al cambiar manualmente un resultado
+  await recalculateAllRankings()
+
   return data
 }
 
@@ -265,7 +269,7 @@ export async function getAllPredictions() {
 // Fechas de inicio de cada fase (cuando las predicciones de otros usuarios se hacen visibles)
 const PHASE_REVEAL_DATES: Record<string, string> = {
   groups:        '2026-06-11T00:00:00Z',
-  Dieciseisavos: '2026-06-28T00:00:00Z', // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  Dieciseisavos: '2026-06-28T00:00:00Z',
   round16:       '2026-07-04T00:00:00Z',
   quarterfinals: '2026-07-09T00:00:00Z',
   semifinals:    '2026-07-14T00:00:00Z',
@@ -346,6 +350,29 @@ export async function updateRanking(userId: string, totalPoints: number, predict
   return data
 }
 
+/**
+ * NUEVA ACCIÓN GLOBAL: Itera sobre todos los usuarios registrados y actualiza sus puntuaciones.
+ */
+export async function recalculateAllRankings() {
+  try {
+    const { data: allUsers, error } = await supabaseAdmin
+      .from('users')
+      .select('username')
+
+    if (error) throw error
+
+    if (allUsers) {
+      for (const user of allUsers) {
+        await calculateUserPoints(user.username)
+      }
+    }
+    return { success: true, message: 'Todos los rankings globales y puntos han sido actualizados con éxito.' }
+  } catch (error: any) {
+    console.error('Error recalculando rankings globales:', error)
+    throw new Error('Error al actualizar rankings: ' + error.message)
+  }
+}
+
 export async function calculateUserPoints(userId: string) {
   const { data: predictions } = await supabaseAdmin
     .from('predictions')
@@ -378,7 +405,7 @@ export async function calculateUserPoints(userId: string) {
 
     const multipliers: Record<string, number> = {
       'groups': 1,
-      'Dieciseisavos': 2, // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+      'Dieciseisavos': 2,
       'round16': 2,
       'quarterfinals': 3,
       'semifinals': 4,
@@ -469,6 +496,11 @@ export async function syncMatchesFromAPI() {
       }
     }
 
+    // AUTOMATIZACIÓN: Si hubo cambios o partidos nuevos finalizados, recalcular todo el pool
+    if (inserted > 0 || updated > 0) {
+      await recalculateAllRankings()
+    }
+
     return {
       success: true,
       total: matches.length,
@@ -516,6 +548,11 @@ export async function updateLiveScores() {
           .eq('home_team', match.homeTeam?.name)
           .eq('away_team', match.awayTeam?.name)
       }
+    }
+
+    // AUTOMATIZACIÓN: Recalcular puntos tras actualizar partidos en vivo o terminados
+    if (matches.length > 0) {
+      await recalculateAllRankings()
     }
 
     return { success: true, count: matches.length }
@@ -717,7 +754,7 @@ function mapPhaseWithCorrection(match: any): string {
 function mapKnownPhase(stage: string): string {
   const phaseMap: Record<string, string> = {
     'GROUP_STAGE': 'groups',
-    'ROUND_OF_32': 'Dieciseisavos', // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+    'ROUND_OF_32': 'Dieciseisavos',
     'ROUND_OF_16': 'round16',
     'QUARTER_FINALS': 'quarterfinals',
     'SEMI_FINALS': 'semifinals',
