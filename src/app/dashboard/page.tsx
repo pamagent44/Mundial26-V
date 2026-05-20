@@ -46,13 +46,52 @@ interface UserData {
 // Definición de fases para el Mundial 2026 (48 equipos)
 const PHASES = [
   { key: 'groups', label: 'Fase de Grupos', multiplier: 1 },
-  { key: 'round32', label: 'Ronda de 32', multiplier: 2 },
+  { key: 'Dieciseisavos', label: 'Dieciseisavos', multiplier: 2 }, // ← CAMBIADO: key de 'round32' a 'Dieciseisavos'
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
   { key: 'final', label: 'Final', multiplier: 5 },
   { key: 'thirdplace', label: '3er Lugar', multiplier: 4 },
 ]
+
+// Fechas de inicio de cada fase (cuando se abren las predicciones de otros usuarios)
+// Hasta esa fecha, cada usuario solo ve sus propias predicciones
+const PHASE_START_DATES: Record<string, Date> = {
+  groups:        new Date('2026-06-11T00:00:00Z'),
+  Dieciseisavos: new Date('2026-06-28T00:00:00Z'), // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  round16:       new Date('2026-07-04T00:00:00Z'),
+  quarterfinals: new Date('2026-07-09T00:00:00Z'),
+  semifinals:    new Date('2026-07-14T00:00:00Z'),
+  thirdplace:    new Date('2026-07-18T00:00:00Z'),
+  final:         new Date('2026-07-19T00:00:00Z'),
+}
+
+// Rangos de fechas de partidos por fase (para filtrar correctamente independiente del campo `phase` de la API)
+const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
+  groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-27T23:59:59Z') },
+  Dieciseisavos: { start: new Date('2026-06-28T00:00:00Z'), end: new Date('2026-07-03T23:59:59Z') }, // ← CAMBIADO: 'round32' por 'Dieciseisavos'
+  round16:       { start: new Date('2026-07-04T00:00:00Z'), end: new Date('2026-07-07T23:59:59Z') },
+  quarterfinals: { start: new Date('2026-07-09T00:00:00Z'), end: new Date('2026-07-11T23:59:59Z') },
+  semifinals:    { start: new Date('2026-07-14T00:00:00Z'), end: new Date('2026-07-15T23:59:59Z') },
+  thirdplace:    { start: new Date('2026-07-18T00:00:00Z'), end: new Date('2026-07-18T23:59:59Z') },
+  final:         { start: new Date('2026-07-19T00:00:00Z'), end: new Date('2026-07-19T23:59:59Z') },
+}
+
+// Devuelve true si la fase ya ha comenzado (las predicciones de otros usuarios son visibles)
+function isPhaseVisible(phaseKey: string): boolean {
+  const startDate = PHASE_START_DATES[phaseKey]
+  if (!startDate) return true // si no hay fecha definida, se muestra
+  return new Date() >= startDate
+}
+
+// Filtra partidos por fase usando rangos de fechas como fuente de verdad
+// Esto evita dependencia del campo `phase` de la API que puede venir mal
+function matchBelongsToPhase(match: Match, phaseKey: string): boolean {
+  const range = PHASE_DATE_RANGES[phaseKey]
+  if (!range) return match.phase === phaseKey
+  const matchDate = new Date(match.match_date)
+  return matchDate >= range.start && matchDate <= range.end
+}
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'predictions' | 'admin'>('dashboard')
@@ -573,19 +612,24 @@ export default function DashboardPage() {
 
               {/* Phase Filter */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                {PHASES.map((phase) => (
-                  <button
-                    key={phase.key}
-                    onClick={() => setSelectedPhase(selectedPhase === phase.key ? null : phase.key)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                      selectedPhase === phase.key
-                        ? 'bg-primary text-white'
-                        : 'bg-gray-100 text-text-secondary hover:bg-primary hover:text-white'
-                    }`}
-                  >
-                    {phase.label} (x{phase.multiplier})
-                  </button>
-                ))}
+                {PHASES.map((phase) => {
+                  const visible = isPhaseVisible(phase.key)
+                  return (
+                    <button
+                      key={phase.key}
+                      onClick={() => setSelectedPhase(selectedPhase === phase.key ? null : phase.key)}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-1 ${
+                        selectedPhase === phase.key
+                          ? 'bg-primary text-white'
+                          : 'bg-gray-100 text-text-secondary hover:bg-primary hover:text-white'
+                      }`}
+                      title={!visible ? `Se revela el ${PHASE_START_DATES[phase.key]?.toLocaleDateString('es-ES')}` : undefined}
+                    >
+                      {!visible && <span>🔒</span>}
+                      {phase.label} (x{phase.multiplier})
+                    </button>
+                  )
+                })}
               </div>
 
               {/* Matches List */}
@@ -604,7 +648,28 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 )}
-                {matches.filter(match => !selectedPhase || match.phase === selectedPhase).map((match) => {
+
+                {/* Banner de fase bloqueada para no-admin */}
+                {selectedPhase && !isAdmin && !isPhaseVisible(selectedPhase) && (
+                  <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-300 rounded-xl mb-2">
+                    <span className="text-2xl">🔒</span>
+                    <div>
+                      <p className="font-semibold text-amber-800">Predicciones ocultas</p>
+                      <p className="text-sm text-amber-700">
+                        Las predicciones de los demás participantes para{' '}
+                        <strong>{getPhaseName(selectedPhase)}</strong> se revelarán el{' '}
+                        <strong>
+                          {PHASE_START_DATES[selectedPhase]?.toLocaleDateString('es-ES', {
+                            day: 'numeric', month: 'long', year: 'numeric'
+                          })}
+                        </strong>{' '}
+                        (inicio de la fase). Solo puedes ver y editar tus propias predicciones.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {matches.filter(match => !selectedPhase || matchBelongsToPhase(match, selectedPhase)).map((match) => {
                   const prediction = predictions[match.id]
                   const isEditing = editingMatch === match.id
                   const canEdit = match.status === 'upcoming'
@@ -714,7 +779,7 @@ export default function DashboardPage() {
                     </div>
                   )
                 })}
-                {matches.filter(match => !selectedPhase || match.phase === selectedPhase).length === 0 && (
+                {matches.filter(match => !selectedPhase || matchBelongsToPhase(match, selectedPhase)).length === 0 && (
                   <p className="text-text-secondary text-center py-8">
                     {selectedPhase
                       ? `No hay partidos en ${getPhaseName(selectedPhase)}.`
