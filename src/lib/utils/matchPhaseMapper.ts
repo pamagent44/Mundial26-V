@@ -2,10 +2,10 @@
 
 // Rangos de fechas basados en el calendario FIFA 2026
 const PHASE_DATE_RANGES = {
-  DIEZ_Y_SEISAVOS: {
+  DIECISEISAVOS: {
     start: new Date('2026-06-28T00:00:00Z'),
     end: new Date('2026-07-04T23:59:59Z'),
-    slug: 'round32'
+    slug: 'Dieciseisavos' // ← CAMBIADO: 'round32' por 'Dieciseisavos'
   },
   OCTAVOS: {
     start: new Date('2026-07-04T00:00:00Z'),
@@ -56,8 +56,8 @@ export function fixMatchPhase(match: {
   if (matchDate >= PHASE_DATE_RANGES.OCTAVOS.start && matchDate <= PHASE_DATE_RANGES.OCTAVOS.end) {
     return PHASE_DATE_RANGES.OCTAVOS.slug
   }
-  if (matchDate >= PHASE_DATE_RANGES.DIEZ_Y_SEISAVOS.start && matchDate <= PHASE_DATE_RANGES.DIEZ_Y_SEISAVOS.end) {
-    return PHASE_DATE_RANGES.DIEZ_Y_SEISAVOS.slug
+  if (matchDate >= PHASE_DATE_RANGES.DIECISEISAVOS.start && matchDate <= PHASE_DATE_RANGES.DIECISEISAVOS.end) {
+    return PHASE_DATE_RANGES.DIECISEISAVOS.slug
   }
   
   return 'groups'
