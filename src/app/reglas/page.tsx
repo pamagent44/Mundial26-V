@@ -142,7 +142,7 @@ export default function RulesPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {[
                   { phase: 'Fase de Grupos', multiplier: 1, icon: '🔵' },
-                  { phase: 'Octavos de Final', multiplier: 2, icon: '🟠' },
+                  { phase: 'Dieciseisavos y Octavos', multiplier: 2, icon: '🟠' }, // ← CAMBIADO: 'Octavos de Final' por 'Dieciseisavos y Octavos'
                   { phase: 'Cuartos de Final', multiplier: 3, icon: '🟡' },
                   { phase: 'Semifinales', multiplier: 4, icon: '🟣' },
                   { phase: 'Final', multiplier: 5, icon: '⭐' },
