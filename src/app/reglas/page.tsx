@@ -269,19 +269,19 @@ export default function RulesPage() {
                       <span className="flex items-center gap-2">
                         <span className="text-2xl">🥇</span> 1º Lugar
                       </span>
-                      <span className="font-bold text-fifa-green">60%</span>
+                      <span className="font-bold text-fifa-green">50%</span>
                     </li>
                     <li className="flex items-center justify-between">
                       <span className="flex items-center gap-2">
                         <span className="text-2xl">🥈</span> 2º Lugar
                       </span>
-                      <span className="font-bold text-primary">30%</span>
+                      <span className="font-bold text-primary">35%</span>
                     </li>
                     <li className="flex items-center justify-between">
                       <span className="flex items-center gap-2">
                         <span className="text-2xl">🥉</span> 3º Lugar
                       </span>
-                      <span className="font-bold text-accent">10%</span>
+                      <span className="font-bold text-accent">15%</span>
                     </li>
                   </ul>
                 </div>
