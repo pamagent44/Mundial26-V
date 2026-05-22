@@ -13,7 +13,7 @@ import {
 import { 
   createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
   deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword,
-  recalculateAllRankings // ← IMPORTADO: La nueva acción global del backend
+  recalculateAllRankings, getMatchDeadline // ← Importados correctamente
 } from '@/app/actions'
 
 // Types
@@ -29,13 +29,6 @@ interface Match {
   group_name?: string
 }
 
-interface Prediction {
-  match_id: string
-  home_score: number
-  away_score: number
-  points?: number
-}
-
 interface UserData {
   username: string
   points: number
@@ -44,7 +37,6 @@ interface UserData {
   password: string
 }
 
-// Definición de fases para el Mundial 2026 (48 equipos)
 const PHASES = [
   { key: 'groups', label: 'Fase de Grupos', multiplier: 1 },
   { key: 'Dieciseisavos', label: 'Dieciseisavos', multiplier: 2 },
@@ -55,18 +47,6 @@ const PHASES = [
   { key: 'thirdplace', label: '3er Lugar', multiplier: 4 },
 ]
 
-// Fechas de inicio de cada fase (cuando se abren las predicciones de otros usuarios)
-const PHASE_START_DATES: Record<string, Date> = {
-  groups:        new Date('2026-06-11T00:00:00Z'),
-  Dieciseisavos: new Date('2026-06-28T00:00:00Z'),
-  round16:       new Date('2026-07-04T00:00:00Z'),
-  quarterfinals: new Date('2026-07-09T00:00:00Z'),
-  semifinals:    new Date('2026-07-14T00:00:00Z'),
-  thirdplace:    new Date('2026-07-18T00:00:00Z'),
-  final:         new Date('2026-07-19T00:00:00Z'),
-}
-
-// Rangos de fechas de partidos por fase
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-27T23:59:59Z') },
   Dieciseisavos: { start: new Date('2026-06-28T00:00:00Z'), end: new Date('2026-07-03T23:59:59Z') },
@@ -77,10 +57,128 @@ const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   final:         { start: new Date('2026-07-19T00:00:00Z'), end: new Date('2026-07-19T23:59:59Z') },
 }
 
-function isPhaseVisible(phaseKey: string): boolean {
-  const startDate = PHASE_START_DATES[phaseKey]
-  if (!startDate) return true
-  return new Date() >= startDate
+// Estructura estática de los 8 bloques límites de control operativo
+const DEADLINE_BLOCKS = [
+  { label: 'Fase de Grupos (Bloque 1)', date: new Date('2026-06-10T23:30:00Z') },
+  { label: 'Fase de Grupos (Bloque 2)', date: new Date('2026-06-17T23:30:00Z') },
+  { label: 'Fase de Grupos (Bloque 3)', date: new Date('2026-06-23T23:30:00Z') },
+  { label: 'Dieciseisavos de Final', date: new Date('2026-06-27T23:30:00Z') },
+  { label: 'Octavos de Final', date: new Date('2026-07-03T23:30:00Z') },
+  { label: 'Cuartos de Final', date: new Date('2026-07-08T23:30:00Z') },
+  { label: 'Semifinales', date: new Date('2026-07-13T23:30:00Z') },
+  { label: 'Final y 3er Puesto', date: new Date('2026-07-17T23:30:00Z') },
+]
+
+/**
+ * COMPONENTE RECOLECTOR DE PARTIDO INDIVIDUAL (PREDICCIONES)
+ */
+function MatchCountdown({ deadline }: { deadline: Date }) {
+  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
+  const [isBlocked, setIsBlocked] = useState(false)
+
+  useEffect(() => {
+    const calculateTime = () => {
+      const now = new Date()
+      const difference = deadline.getTime() - now.getTime()
+
+      if (difference <= 0) {
+        setIsBlocked(true)
+        setTimeLeft(null)
+      } else {
+        setIsBlocked(false)
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((difference / 1000 / 60) % 60),
+          seconds: Math.floor((difference / 1000) % 60),
+        })
+      }
+    }
+
+    calculateTime()
+    const timer = setInterval(calculateTime, 1000)
+    return () => clearInterval(timer)
+  }, [deadline])
+
+  if (isBlocked) {
+    return <span className="text-sm font-bold text-fifa-red animate-pulse">🔒 Bloqueado</span>
+  }
+  if (!timeLeft) return null
+
+  return (
+    <span className="text-xs font-mono bg-gray-100 text-text-secondary px-2 py-1 rounded border border-gray-200 shadow-sm">
+      ⏳ {timeLeft.days}d {String(timeLeft.hours).padStart(2, '0')}h:{String(timeLeft.minutes).padStart(2, '0')}m:{String(timeLeft.seconds).padStart(2, '0')}s
+    </span>
+  )
+}
+
+/**
+ * MEJORA: COMPONENTE DINÁMICO DEL TEMPORIZADOR GLOBAL EN DASHBOARD
+ * Encuentra de forma reactiva el siguiente bloque operativo y renderiza su cuenta atrás.
+ */
+function DashboardDeadlineTimer() {
+  const [currentBlock, setCurrentBlock] = useState<{ label: string; date: Date } | null>(null)
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+  const [finished, setFinished] = useState(false)
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const now = new Date()
+      // Buscar el primer bloque temporal cuya fecha límite sea mayor al momento actual
+      const activeBlock = DEADLINE_BLOCKS.find(b => b.date.getTime() > now.getTime())
+
+      if (!activeBlock) {
+        setFinished(true)
+        setCurrentBlock(null)
+        return
+      }
+
+      setCurrentBlock(activeBlock)
+      setFinished(false)
+
+      const difference = activeBlock.date.getTime() - now.getTime()
+      setTimeLeft({
+        days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((difference / 1000 / 60) % 60),
+        seconds: Math.floor((difference / 1000) % 60),
+      })
+    }
+
+    updateTimer()
+    const interval = setInterval(updateTimer, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (finished) {
+    return (
+      <div className="text-center py-4 bg-white/10 rounded-xl border border-white/20">
+        <p className="font-bold text-lg">🔒 Predicciones Cerradas</p>
+        <p className="text-xs text-white/80 mt-1">El mundial está en curso o ha finalizado.</p>
+      </div>
+    )
+  }
+
+  if (!currentBlock) return null
+
+  return (
+    <div className="text-center">
+      <div className="mb-3">
+        <span className="text-xs font-bold uppercase tracking-wider bg-white/20 text-white px-3 py-1 rounded-full border border-white/10">
+          🎯 Cierre: {currentBlock.label}
+        </span>
+      </div>
+      <div className="grid grid-cols-4 gap-2 font-bold text-center">
+        <div className="bg-white/20 p-2 rounded"><div>{timeLeft.days}</div><div className="text-xs font-normal">Días</div></div>
+        <div className="bg-white/20 p-2 rounded"><div>{String(timeLeft.hours).padStart(2, '0')}</div><div className="text-xs font-normal">Horas</div></div>
+        <div className="bg-white/20 p-2 rounded"><div>{String(timeLeft.minutes).padStart(2, '0')}</div><div className="text-xs font-normal">Min</div></div>
+        <div className="bg-white/20 p-2 rounded"><div>{String(timeLeft.seconds).padStart(2, '0')}</div><div className="text-xs font-normal">Seg</div></div>
+      </div>
+      <p className="text-[10px] text-white/60 mt-3">
+        Límite: {currentBlock.date.toLocaleDateString('es-ES')} a las 23:30 (Hora UTC)
+      </p>
+    </div>
+  )
 }
 
 function matchBelongsToPhase(match: Match, phaseKey: string): boolean {
@@ -104,30 +202,25 @@ export default function DashboardPage() {
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null)
   const router = useRouter()
 
-  // Admin state
+  // Admin states
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [userCreated, setUserCreated] = useState(false)
   const [userError, setUserError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
-
-  // Nuevo estado para el botón Calcular
   const [calculating, setCalculating] = useState(false)
   const [calcMessage, setCalcMessage] = useState('')
   
-  // Reset password state
   const [showResetModal, setShowResetModal] = useState(false)
   const [selectedUser, setSelectedUser] = useState('')
   const [newTempPassword, setNewTempPassword] = useState('')
 
-  // Change own password state
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPasswordAdmin, setNewPasswordAdmin] = useState('')
   const [confirmPasswordAdmin, setConfirmPasswordAdmin] = useState('')
  
-  // Backup state
   const [downloading, setDownloading] = useState(false)
   const [backupInfo, setBackupInfo] = useState<{ date: string; count: number } | null>(null)
   const [showBackupConfirm, setShowBackupConfirm] = useState(false)
@@ -145,14 +238,11 @@ export default function DashboardPage() {
     const parsedUser = JSON.parse(userData)
     setCurrentUser(parsedUser)
     setIsAdmin(parsedUser.isAdmin || parsedUser.is_admin || false)
-
     loadData(parsedUser.username)
   }, [router])
 
   useEffect(() => {
-    if (isAdmin) {
-      loadBackupInfo()
-    }
+    if (isAdmin) loadBackupInfo()
   }, [isAdmin])
 
   const loadData = async (username: string) => {
@@ -162,7 +252,6 @@ export default function DashboardPage() {
         getUsers(),
         getUserPredictions(username)
       ])
-
       setMatches(matchesData || [])
       setUsers(usersData || [])
 
@@ -172,7 +261,7 @@ export default function DashboardPage() {
       })
       setPredictions(preds)
     } catch (err) {
-      console.error('Error cargando datos:', err)
+      console.error(err)
     } finally {
       setLoading(false)
     }
@@ -190,18 +279,12 @@ export default function DashboardPage() {
 
   const handleSavePrediction = async (matchId: string) => {
     if (!currentUser) return
-
     try {
       await createPrediction(currentUser.username, matchId, tempPrediction.homeScore, tempPrediction.awayScore)
-
-      const newPredictions = {
-        ...predictions,
-        [matchId]: tempPrediction
-      }
-      setPredictions(newPredictions)
+      setPredictions({ ...predictions, [matchId]: tempPrediction })
       setEditingMatch(null)
     } catch (err: any) {
-      alert('Error guardando predicción: ' + err.message)
+      alert(err.message)
     }
   }
 
@@ -222,1079 +305,314 @@ export default function DashboardPage() {
     if (prediction.awayScore === match.away_score) points += 3
     else if (Math.abs(prediction.awayScore - match.away_score) === 1) points += 1
 
-    const multiplier = getPhaseMultiplier(match.phase)
-    return points * multiplier
+    return points * getPhaseMultiplier(match.phase)
   }
 
   const handleCreateUser = async () => {
-    setUserError('')
-    setUserCreated(false)
-
-    if (!newUsername || newUsername.length < 3) {
-      setUserError('El nombre de usuario debe tener al menos 3 caracteres')
+    setUserError(''); setUserCreated(false)
+    if (!newUsername || newUsername.length < 3 || !newPassword || newPassword.length < 6) {
+      setUserError('Verifica la longitud del usuario (3) y contraseña (6)')
       return
     }
-
-    if (!newPassword || newPassword.length < 6) {
-      setUserError('La contraseña debe tener al menos 6 caracteres')
-      return
-    }
-
     try {
       await createUser(newUsername, newPassword, false)
-      setUserCreated(true)
-      setNewUsername('')
-      setNewPassword('')
-
+      setUserCreated(true); setNewUsername(''); setNewPassword('')
       const usersData = await getUsers()
       setUsers(usersData || [])
-
       setTimeout(() => setUserCreated(false), 3000)
     } catch (err: any) {
-      setUserError(err.message || 'Error creando usuario')
+      setUserError(err.message)
     }
   }
 
   const handleDeleteUser = async (username: string) => {
-    if (username === 'admin') {
-      setUserError('No se puede eliminar el usuario admin')
-      return
-    }
-    
-    if (!confirm(`¿Estás seguro de que quieres eliminar al usuario "${username}"? Se eliminarán todas sus predicciones.`)) {
-      return
-    }
-    
-    setUserError('')
-    setSyncing(true)
-    
+    if (username === 'admin') return
+    if (!confirm(`¿Eliminar usuario "${username}"?`)) return
     try {
       await deleteUser(username)
-      
       const usersData = await getUsers()
       setUsers(usersData || [])
-      
-      setUserCreated(true)
-      setTimeout(() => setUserCreated(false), 3000)
     } catch (err: any) {
-      setUserError(err.message || 'Error eliminando usuario')
-    } finally {
-      setSyncing(false)
+      alert(err.message)
     }
   }
 
   const handleResetPassword = (username: string) => {
-    setSelectedUser(username)
-    setNewTempPassword('')
-    setShowResetModal(true)
+    setSelectedUser(username); setNewTempPassword(''); setShowResetModal(true)
   }
 
   const handleConfirmResetPassword = async () => {
-    if (!newTempPassword || newTempPassword.length < 6) {
-      setUserError('La contraseña debe tener al menos 6 caracteres')
-      return
-    }
-    
-    setSyncing(true)
+    if (!newTempPassword || newTempPassword.length < 6) return
     try {
       await resetPassword(selectedUser, newTempPassword)
-      setUserCreated(true)
-      setSyncMessage(`✅ Contraseña reseteada para ${selectedUser}`)
-      setTimeout(() => {
-        setUserCreated(false)
-        setSyncMessage('')
-      }, 3000)
-      setShowResetModal(false)
-      setNewTempPassword('')
+      setShowResetModal(false); setNewTempPassword('')
+      alert('Contraseña cambiada temporalmente')
     } catch (err: any) {
-      setUserError(err.message || 'Error reseteando contraseña')
-    } finally {
-      setSyncing(false)
+      alert(err.message)
     }
   }
 
   const handleChangeOwnPassword = async () => {
-    if (!currentPassword) {
-      setUserError('Debes ingresar tu contraseña actual')
+    if (newPasswordAdmin !== confirmPasswordAdmin || currentPassword !== currentUser?.password) {
+      alert('Error en las credenciales introducidas')
       return
     }
-    
-    if (!newPasswordAdmin || newPasswordAdmin.length < 6) {
-      setUserError('La nueva contraseña debe tener al menos 6 caracteres')
-      return
-    }
-    
-    if (newPasswordAdmin !== confirmPasswordAdmin) {
-      setUserError('Las contraseñas nuevas no coinciden')
-      return
-    }
-    
-    if (currentPassword !== currentUser?.password) {
-      setUserError('Contraseña actual incorrecta')
-      return
-    }
-    
-    setSyncing(true)
     try {
       await updatePassword(currentUser!.username, newPasswordAdmin)
-      
-      const updatedUser = { ...currentUser, password: newPasswordAdmin, must_change_password: false }
-      localStorage.setItem('user', JSON.stringify(updatedUser))
-      setCurrentUser(updatedUser)
-      
-      setSyncMessage('✅ Tu contraseña ha sido actualizada correctamente')
       setShowChangePasswordModal(false)
-      setCurrentPassword('')
-      setNewPasswordAdmin('')
-      setConfirmPasswordAdmin('')
-      
-      setTimeout(() => setSyncMessage(''), 3000)
+      alert('Contraseña actualizada')
     } catch (err: any) {
-      setUserError(err.message || 'Error cambiando contraseña')
-    } finally {
-      setSyncing(false)
+      alert(err.message)
     }
   }
 
   const handleSyncMatches = async () => {
     setSyncing(true)
-    setSyncMessage('')
     try {
       const result = await syncMatchesFromAPI()
-      setSyncMessage(`✅ ${result.total} partidos sincronizados (${result.inserted} nuevos, ${result.updated} actualizados)`)
+      setSyncMessage(`✅ ${result.total} partidos sincronizados.`)
       const matchesData = await getMatches()
       setMatches(matchesData || [])
-      
-      // Actualizar ranking local tras sync
-      const usersData = await getUsers()
-      setUsers(usersData || [])
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
       setSyncing(false)
-      setTimeout(() => setSyncMessage(''), 5000)
     }
   }
 
-  // Nueva función disparadora para el botón Calcular
-  const handleRecalculateAllRankings = async () => {
+  const handleRecalculateRankings = async () => {
     setCalculating(true)
-    setCalcMessage('')
     try {
       const result = await recalculateAllRankings()
       setCalcMessage(`✅ ${result.message}`)
-      
-      // Volver a pedir la lista de usuarios actualizada para refrescar la UI (Top 3 e histórico)
       const usersData = await getUsers()
       setUsers(usersData || [])
     } catch (err: any) {
-      setCalcMessage('❌ Error calculando puntos: ' + err.message)
+      setCalcMessage('❌ ' + err.message)
     } finally {
       setCalculating(false)
-      setTimeout(() => setCalcMessage(''), 5000)
-    }
-  }
-
-  // Backup functions
-  const handleCreateBackup = async () => {
-    setShowBackupConfirm(false)
-    setSyncing(true)
-    try {
-      const result = await createPredictionBackup()
-      if (result.success) {
-        setSyncMessage(`✅ ${result.message}`)
-        await loadBackupInfo()
-      } else {
-        setSyncMessage('❌ Error al crear backup')
-      }
-    } catch (err: any) {
-      setSyncMessage('❌ ' + err.message)
-    } finally {
-      setSyncing(false)
-      setTimeout(() => setSyncMessage(''), 5000)
     }
   }
 
   const loadBackupInfo = async () => {
-    try {
-      const result = await getLatestBackup()
-      if (result.success && result.backup) {
-        const backupData = result.backup.backup_data
-        setBackupInfo({
-          date: new Date(result.backup.backup_date).toLocaleString(),
-          count: backupData.total_predictions || backupData.predictions?.length || 0
-        })
-      }
-    } catch (err) {
-      console.error('Error cargando info backup:', err)
+    const result = await getLatestBackup()
+    if (result.success && result.backup) {
+      setBackupInfo({
+        date: new Date(result.backup.backup_date).toLocaleString(),
+        count: result.backup.backup_data.total_predictions || 0
+      })
     }
   }
 
   const handleDownloadBackup = async () => {
     setDownloading(true)
-    try {
-      const result = await getLatestBackup()
-      if (result.success && result.backup) {
-        const backupData = result.backup.backup_data
-        const jsonStr = JSON.stringify(backupData, null, 2)
-        const blob = new Blob([jsonStr], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `backup_predicciones_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-        setSyncMessage('✅ Backup descargado correctamente')
-      } else {
-        setSyncMessage('❌ No hay backups disponibles para descargar')
-      }
-    } catch (err: any) {
-      setSyncMessage('❌ ' + err.message)
-    } finally {
-      setDownloading(false)
-      setTimeout(() => setSyncMessage(''), 5000)
+    const result = await getLatestBackup()
+    if (result.success && result.backup) {
+      const blob = new Blob([JSON.stringify(result.backup.backup_data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'backup.json'; a.click()
     }
-  }
-
-  if (!mounted || loading) {
-    return (
-      <div className="flex flex-col min-h-screen bg-background items-center justify-center">
-        <div className="animate-spin h-10 w-10 border-4 border-primary border-t-transparent rounded-full"></div>
-        <p className="mt-4 text-text-secondary">Cargando...</p>
-      </div>
-    )
+    setDownloading(false)
   }
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <Navbar />
-
       <main className="flex-1 py-8 px-4">
         <div className="max-w-7xl mx-auto">
-          {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-text-primary mb-2">
-              ¡Bienvenido, {currentUser?.username}!
-            </h1>
+            <h1 className="text-3xl font-bold text-text-primary mb-2">¡Bienvenido, {currentUser?.username}!</h1>
             <p className="text-text-secondary">Panel de control de la porra del Mundial 2026</p>
           </div>
 
-          {/* Tabs */}
           <div className="flex gap-2 mb-8 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap ${
-                activeTab === 'dashboard'
-                  ? 'bg-primary text-white'
-                  : 'bg-surface text-text-secondary hover:bg-gray-100'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => setActiveTab('predictions')}
-              className={`px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap ${
-                activeTab === 'predictions'
-                  ? 'bg-primary text-white'
-                  : 'bg-surface text-text-secondary hover:bg-gray-100'
-              }`}
-            >
-              Predicciones
-            </button>
-            {isAdmin && (
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`px-6 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap ${
-                  activeTab === 'admin'
-                    ? 'bg-fifa-red text-white'
-                    : 'bg-surface text-text-secondary hover:bg-gray-100'
-                }`}
-              >
-                Admin
-              </button>
-            )}
+            {['dashboard', 'predictions', 'admin'].map((tab) => {
+              if (tab === 'admin' && !isAdmin) return null
+              return (
+                <button
+                  key={tab} onClick={() => setActiveTab(tab as any)}
+                  className={`px-6 py-3 rounded-lg font-semibold capitalize ${activeTab === tab ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}
+                >
+                  {tab}
+                </button>
+              )
+            })}
           </div>
 
-          {/* Dashboard Tab */}
           {activeTab === 'dashboard' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Countdown */}
-              <div className="lg:col-span-1 bg-gradient-to-br from-primary to-fifa-green rounded-2xl p-6 text-white">
+              {/* CAMBIADO: Reemplazado por el componente dinámico adaptativo de bloques */}
+              <div className="lg:col-span-1 bg-gradient-to-br from-primary to-fifa-green rounded-2xl p-6 text-white shadow-lg flex flex-col justify-center">
                 <div className="flex items-center gap-2 mb-4">
                   <Clock className="w-6 h-6" />
-                  <h2 className="text-xl font-bold">Deadline de Fase</h2>
+                  <h2 className="text-xl font-bold">Próximo Cierre</h2>
                 </div>
-                <div className="text-center">
-                  <p className="text-white/80 mb-4">Cierre de predicciones en:</p>
-                  <CountdownTimer />
-                </div>
+                <DashboardDeadlineTimer />
               </div>
 
-              {/* Ranking Preview */}
               <div className="lg:col-span-2 bg-surface rounded-2xl shadow-lg p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <Trophy className="w-6 h-6 text-accent" />
-                    <h2 className="text-xl font-bold text-text-primary">Top 3 Ranking</h2>
-                  </div>
+                  <div className="flex items-center gap-2"><Trophy className="w-6 h-6 text-accent" /><h2 className="text-xl font-bold">Top 3 Ranking</h2></div>
                   <Link href="/ranking" className="text-primary font-semibold hover:underline">Ver todo</Link>
                 </div>
                 <div className="space-y-4">
-                  {users.slice(0, 3).map((u, index) => (
-                    <div key={u.username} className="flex items-center gap-4 p-3 rounded-lg bg-gray-50">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
-                        index === 0 ? 'bg-accent text-text-primary' :
-                        index === 1 ? 'bg-gray-300 text-text-primary' :
-                        'bg-amber-700 text-white'
-                      }`}>
-                        {index + 1}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-semibold text-text-primary">{u.username}</p>
-                        <p className="text-sm text-text-secondary">{u.is_admin ? 'Admin' : 'Participante'}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-primary">{u.points || 0}</p>
-                        <p className="text-xs text-text-secondary">puntos</p>
-                      </div>
+                  {users.slice(0, 3).map((u, idx) => (
+                    <div key={u.username} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                      <span className="font-bold">{idx + 1}. {u.username}</span>
+                      <span className="text-xl font-bold text-primary">{u.points || 0} pts</span>
                     </div>
                   ))}
-                  {users.length === 0 && (
-                    <p className="text-text-secondary text-center py-4">No hay usuarios registrados</p>
-                  )}
                 </div>
               </div>
 
-              {/* Today's Matches */}
               <div className="lg:col-span-3 bg-surface rounded-2xl shadow-lg p-6">
-                <div className="flex items-center gap-2 mb-6">
-                  <Calendar className="w-6 h-6 text-primary" />
-                  <h2 className="text-xl font-bold text-text-primary">Próximos Partidos</h2>
-                </div>
+                <h2 className="text-xl font-bold mb-4">Próximos Partidos</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {matches.slice(0, 6).map((match) => (
-                    <div key={match.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded">
-                          {getPhaseName(match.phase)}
-                        </span>
-                        {match.group_name && (
-                          <span className="text-xs font-medium text-text-secondary bg-gray-200 px-2 py-1 rounded">
-                            Grupo {match.group_name}
-                          </span>
-                        )}
-                        {match.status === 'live' && (
-                          <span className="flex items-center gap-1 text-xs font-medium text-fifa-red bg-fifa-red/10 px-2 py-1 rounded animate-pulse">
-                            <Play className="w-3 h-3" /> EN VIVO
-                          </span>
-                        )}
-                        {match.status === 'finished' && (
-                          <span className="text-xs font-medium text-fifa-green bg-fifa-green/10 px-2 py-1 rounded">
-                            FINAL
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="text-center flex-1">
-                          <p className="font-semibold text-sm text-text-primary">{match.home_team}</p>
-                          <p className="text-lg font-bold text-text-primary">
-                            {match.home_score !== undefined ? match.home_score : '-'}
-                          </p>
-                        </div>
-                        <div className="text-center px-4">
-                          <p className="text-text-secondary text-sm">vs</p>
-                          <p className="text-xs text-text-secondary">
-                            {new Date(match.match_date).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className="text-center flex-1">
-                          <p className="font-semibold text-sm text-text-primary">{match.away_team}</p>
-                          <p className="text-lg font-bold text-text-primary">
-                            {match.away_score !== undefined ? match.away_score : '-'}
-                          </p>
-                        </div>
+                  {matches.slice(0, 6).map(m => (
+                    <div key={m.id} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                      <div className="flex justify-between text-xs text-text-secondary mb-2"><span>{getPhaseName(m.phase)}</span><span>{m.status.toUpperCase()}</span></div>
+                      <div className="flex justify-between items-center font-semibold">
+                        <span>{m.home_team} {m.home_score ?? '-'}</span>
+                        <span>vs</span>
+                        <span>{m.away_score ?? '-'} {m.away_team}</span>
                       </div>
                     </div>
                   ))}
-                  {matches.length === 0 && (
-                    <p className="text-text-secondary text-center py-4 col-span-3">No hay partidos programados. Sincroniza desde el panel de Admin.</p>
-                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* Predictions Tab */}
           {activeTab === 'predictions' && (
             <div className="bg-surface rounded-2xl shadow-lg p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Edit3 className="w-6 h-6 text-primary" />
-                <h2 className="text-xl font-bold text-text-primary">Mis Predicciones</h2>
-              </div>
-
-              {/* Phase Filter */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                {PHASES.map((phase) => {
-                  const visible = isPhaseVisible(phase.key)
-                  return (
-                    <button
-                      key={phase.key}
-                      onClick={() => setSelectedPhase(selectedPhase === phase.key ? null : phase.key)}
-                      className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap flex items-center gap-1 ${
-                        selectedPhase === phase.key
-                          ? 'bg-primary text-white'
-                          : 'bg-gray-100 text-text-secondary hover:bg-primary hover:text-white'
-                      }`}
-                      title={!visible ? `Se revela el ${PHASE_START_DATES[phase.key]?.toLocaleDateString('es-ES')}` : undefined}
-                    >
-                      {!visible && <span>🔒</span>}
-                      {phase.label} (x{phase.multiplier})
-                    </button>
-                  )
-                })}
+                {PHASES.map((phase) => (
+                  <button
+                    key={phase.key} onClick={() => setSelectedPhase(selectedPhase === phase.key ? null : phase.key)}
+                    className={`px-4 py-2 rounded-lg font-medium ${selectedPhase === phase.key ? 'bg-primary text-white' : 'bg-gray-100 text-text-secondary'}`}
+                  >
+                    {phase.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Matches List */}
               <div className="space-y-4">
-                {selectedPhase && (
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-sm text-text-secondary">Filtrando por:</span>
-                    <span className="px-3 py-1 bg-primary text-white text-sm rounded-full font-medium">
-                      {getPhaseName(selectedPhase)}
-                    </span>
-                    <button
-                      onClick={() => setSelectedPhase(null)}
-                      className="text-sm text-fifa-red hover:underline"
-                    >
-                      Limpiar filtro
-                    </button>
-                  </div>
-                )}
-
-                {/* Banner de fase bloqueada para no-admin */}
-                {selectedPhase && !isAdmin && !isPhaseVisible(selectedPhase) && (
-                  <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-300 rounded-xl mb-2">
-                    <span className="text-2xl">🔒</span>
-                    <div>
-                      <p className="font-semibold text-amber-800">Predicciones ocultas</p>
-                      <p className="text-sm text-amber-700">
-                        Las predicciones de los demás participantes para{' '}
-                        <strong>{getPhaseName(selectedPhase)}</strong> se revelarán el{' '}
-                        <strong>
-                          {PHASE_START_DATES[selectedPhase]?.toLocaleDateString('es-ES', {
-                            day: 'numeric', month: 'long', year: 'numeric'
-                          })}
-                        </strong>{' '}
-                        (inicio de la fase). Solo puedes ver y editar tus propias predicciones.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
                 {matches.filter(match => !selectedPhase || matchBelongsToPhase(match, selectedPhase)).map((match) => {
                   const prediction = predictions[match.id]
                   const isEditing = editingMatch === match.id
-                  const canEdit = match.status === 'upcoming'
-                  const multiplier = getPhaseMultiplier(match.phase)
+                  
+                  const deadline = getMatchDeadline(match.match_date)
+                  const canEdit = match.status === 'upcoming' && (new Date() < deadline)
 
                   return (
                     <div key={match.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                       <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded">
-                            {getPhaseName(match.phase)} (x{multiplier})
-                          </span>
-                          {match.group_name && (
-                            <span className="text-xs font-medium text-text-secondary bg-gray-200 px-2 py-1 rounded">
-                              Grupo {match.group_name}
-                            </span>
-                          )}
+                        <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">{getPhaseName(match.phase)}</span>
+                        
+                        <div className="flex items-center gap-3">
+                          <MatchCountdown deadline={deadline} />
+                          <span className="text-sm text-text-secondary">{new Date(match.match_date).toLocaleDateString('es-ES')}</span>
                         </div>
-                        <span className="text-sm text-text-secondary">
-                          {new Date(match.match_date).toLocaleDateString()}
-                        </span>
                       </div>
 
                       <div className="flex items-center justify-between">
-                        <div className="text-center flex-1">
-                          <p className="font-semibold text-text-primary">{match.home_team}</p>
-                        </div>
-
-                        <div className="flex items-center gap-4">
+                        <span className="font-semibold w-1/3 text-left">{match.home_team}</span>
+                        <div className="flex items-center gap-2">
                           {canEdit ? (
                             isEditing ? (
                               <>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={tempPrediction.homeScore}
-                                  onChange={(e) => setTempPrediction({ ...tempPrediction, homeScore: parseInt(e.target.value) || 0 })}
-                                  className="w-16 h-12 text-center text-2xl font-bold border-2 border-primary rounded-lg focus:ring-2 focus:ring-primary outline-none"
-                                />
-                                <span className="text-2xl font-bold text-text-secondary">-</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={tempPrediction.awayScore}
-                                  onChange={(e) => setTempPrediction({ ...tempPrediction, awayScore: parseInt(e.target.value) || 0 })}
-                                  className="w-16 h-12 text-center text-2xl font-bold border-2 border-primary rounded-lg focus:ring-2 focus:ring-primary outline-none"
-                                />
-                                <button
-                                  onClick={() => handleSavePrediction(match.id)}
-                                  className="p-2 bg-fifa-green text-white rounded-lg hover:bg-green-700 transition-colors"
-                                >
-                                  <Save className="w-5 h-5" />
-                                </button>
+                                <input type="number" value={tempPrediction.homeScore} onChange={(e) => setTempPrediction({ ...tempPrediction, homeScore: parseInt(e.target.value) || 0 })} className="w-12 text-center border rounded" />
+                                <span>-</span>
+                                <input type="number" value={tempPrediction.awayScore} onChange={(e) => setTempPrediction({ ...tempPrediction, awayScore: parseInt(e.target.value) || 0 })} className="w-12 text-center border rounded" />
+                                <button onClick={() => handleSavePrediction(match.id)} className="p-2 bg-fifa-green text-white rounded"><Save className="w-4 h-4" /></button>
                               </>
                             ) : (
                               <>
-                                <span className="w-16 h-12 flex items-center justify-center text-2xl font-bold bg-white border-2 border-gray-300 rounded-lg">
-                                  {prediction ? prediction.homeScore : '-'}
-                                </span>
-                                <span className="text-2xl font-bold text-text-secondary">-</span>
-                                <span className="w-16 h-12 flex items-center justify-center text-2xl font-bold bg-white border-2 border-gray-300 rounded-lg">
-                                  {prediction ? prediction.awayScore : '-'}
-                                </span>
-                                <button
-                                  onClick={() => {
-                                    setEditingMatch(match.id)
-                                    setTempPrediction(prediction || { homeScore: 0, awayScore: 0 })
-                                  }}
-                                  className="p-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors"
-                                >
-                                  <Edit3 className="w-5 h-5" />
-                                </button>
+                                <span className="w-12 text-center font-bold bg-white p-1 border rounded">{prediction ? prediction.homeScore : '-'}</span>
+                                <span>-</span>
+                                <span className="w-12 text-center font-bold bg-white p-1 border rounded">{prediction ? prediction.awayScore : '-'}</span>
+                                
+                                <button onClick={() => { setEditingMatch(match.id); setTempPrediction(prediction || { homeScore: 0, awayScore: 0 }) }} className="p-2 bg-primary text-white rounded"><Edit3 className="w-4 h-4" /></button>
                               </>
                             )
                           ) : (
                             <>
-                              <span className="w-16 h-12 flex items-center justify-center text-2xl font-bold bg-white border-2 border-gray-300 rounded-lg">
-                                {prediction ? prediction.homeScore : '-'}
-                              </span>
-                              <span className="text-2xl font-bold text-text-secondary">-</span>
-                              <span className="w-16 h-12 flex items-center justify-center text-2xl font-bold bg-white border-2 border-gray-300 rounded-lg">
-                                {prediction ? prediction.awayScore : '-'}
-                              </span>
-                              {prediction && match.status === 'finished' && (
-                                <div className={`px-3 py-1 rounded-lg font-bold ${
-                                  getMatchPoints(match) && getMatchPoints(match)! > 0
-                                    ? 'bg-fifa-green/20 text-fifa-green'
-                                    : 'bg-gray-200 text-text-secondary'
-                                }`}>
-                                  +{getMatchPoints(match) || 0} pts
-                                </div>
-                              )}
+                              <span className="w-12 text-center font-bold bg-gray-200 p-1 border rounded">{prediction ? prediction.homeScore : '-'}</span>
+                              <span>-</span>
+                              <span className="w-12 text-center font-bold bg-gray-200 p-1 border rounded">{prediction ? prediction.awayScore : '-'}</span>
+                              {prediction && match.status === 'finished' && <span className="ml-2 text-fifa-green font-bold">+{getMatchPoints(match)} pts</span>}
                             </>
                           )}
                         </div>
-
-                        <div className="text-center flex-1">
-                          <p className="font-semibold text-text-primary">{match.away_team}</p>
-                        </div>
+                        <span className="font-semibold w-1/3 text-right">{match.away_team}</span>
                       </div>
-
-                      {!canEdit && !prediction && (
-                        <p className="text-sm text-center text-text-secondary mt-2">
-                          No hiciste predicción para este partido
-                        </p>
-                      )}
                     </div>
                   )
                 })}
-                {matches.filter(match => !selectedPhase || matchBelongsToPhase(match, selectedPhase)).length === 0 && (
-                  <p className="text-text-secondary text-center py-8">
-                    {selectedPhase
-                      ? `No hay partidos en ${getPhaseName(selectedPhase)}.`
-                      : 'No hay partidos disponibles. Sincroniza desde el panel de Admin.'}
-                  </p>
-                )}
-              </div>
-
-              <div className="mt-6 p-4 bg-accent/10 border border-accent rounded-lg">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-text-primary">Recuerda</p>
-                    <p className="text-sm text-text-secondary">
-                      Las predicciones se bloquean 24h antes del primer partido de cada fase.
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
           )}
 
-          {/* Admin Tab */}
           {activeTab === 'admin' && isAdmin && (
-            <div className="bg-surface rounded-2xl shadow-lg p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Shield className="w-6 h-6 text-fifa-red" />
-                <h2 className="text-xl font-bold text-text-primary">Panel de Administración</h2>
-              </div>
-
-              {/* Grid para acomodar las acciones principales */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                
-                {/* Sincronizar Partidos */}
-                <div className="bg-fifa-green/5 border border-fifa-green/20 rounded-xl p-6 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <Calendar className="w-5 h-5 text-fifa-green" />
-                      <h3 className="font-semibold text-text-primary">Sincronizar Partidos</h3>
-                    </div>
-                    <p className="text-sm text-text-secondary mb-4">
-                      Descarga los partidos oficiales del Mundial 2026 desde football-data.org
-                    </p>
-                    {syncMessage && (
-                      <div className={`px-4 py-3 rounded-lg mb-4 ${syncMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                        {syncMessage}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleSyncMatches}
-                    disabled={syncing}
-                    className="w-full bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {syncing ? (
-                      <>
-                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Sincronizando...
-                      </>
-                    ) : (
-                      <>
-                        <Calendar className="w-4 h-4" />
-                        Sincronizar Partidos
-                      </>
-                    )}
-                  </button>
+            <div className="bg-surface rounded-2xl shadow-lg p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-gray-50 rounded-xl border">
+                  <h3 className="font-bold mb-2">Sincronización API</h3>
+                  <button onClick={handleSyncMatches} disabled={syncing} className="bg-fifa-green text-white px-4 py-2 rounded w-full">Sincronizar Partidos</button>
+                  {syncMessage && <p className="text-xs mt-2">{syncMessage}</p>}
                 </div>
-
-                {/* NUEVA SECCIÓN: Recalcular Puntos Manualmente */}
-                <div className="bg-accent/5 border border-accent/20 rounded-xl p-6 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <Trophy className="w-5 h-5 text-accent" />
-                      <h3 className="font-semibold text-text-primary">Calcular Puntos Manual</h3>
-                    </div>
-                    <p className="text-sm text-text-secondary mb-4">
-                      Fuerza el cálculo inmediato de las puntuaciones y actualiza los rankings generales de todos los usuarios.
-                    </p>
-                    {calcMessage && (
-                      <div className={`px-4 py-3 rounded-lg mb-4 ${calcMessage.includes('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                        {calcMessage}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleRecalculateAllRankings}
-                    disabled={calculating}
-                    className="w-full bg-accent hover:bg-yellow-600 text-text-primary font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {calculating ? (
-                      <>
-                        <svg className="animate-spin h-5 w-5 text-text-primary" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Calculando marcadores...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="w-4 h-4" />
-                        Calcular Puntos y Rankings
-                      </>
-                    )}
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Backup Section */}
-              <div className="bg-primary/5 border border-primary/20 rounded-xl p-6 mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Database className="w-5 h-5 text-primary" />
-                  <h3 className="font-semibold text-text-primary">Copia de Seguridad</h3>
-                </div>
-                <p className="text-sm text-text-secondary mb-4">
-                  Las copias se realizan automáticamente todos los días a las 23:30. Se mantienen las últimas 3 copias.
-                </p>
-                
-                {backupInfo && (
-                  <div className="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
-                    <p className="text-text-secondary">
-                      <span className="font-medium">Última copia:</span> {backupInfo.date} | 
-                      <span className="font-medium ml-2">{backupInfo.count} predicciones</span>
-                    </p>
-                  </div>
-                )}
-                
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleDownloadBackup}
-                    disabled={downloading}
-                    className="flex-1 bg-primary hover:bg-fifa-blue text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {downloading ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Descargando...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        Descargar Última Copia
-                      </>
-                    )}
-                  </button>
-                  
-                  <button
-                    onClick={() => setShowBackupConfirm(true)}
-                    className="flex-1 bg-fifa-green hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    Crear Copia Ahora
-                  </button>
+                <div className="p-4 bg-gray-50 rounded-xl border">
+                  <h3 className="font-bold mb-2">Puntuaciones Manual</h3>
+                  <button onClick={handleRecalculateRankings} disabled={calculating} className="bg-accent text-text-primary px-4 py-2 rounded w-full font-bold">Calcular Puntos ahora</button>
+                  {calcMessage && <p className="text-xs mt-2">{calcMessage}</p>}
                 </div>
               </div>
 
-              {/* Cambiar mi propia contraseña */}
-              <div className="bg-gray-50 rounded-xl p-4 mb-6 flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-text-primary">Mi Contraseña</h3>
-                  <p className="text-sm text-text-secondary">Cambia tu contraseña de administrador</p>
+              <div className="p-4 bg-gray-50 border rounded-xl">
+                <h3 className="font-bold mb-4">Crear Participante</h3>
+                <div className="flex gap-2">
+                  <input type="text" placeholder="Usuario" value={newUsername} onChange={e => setNewUsername(e.target.value)} className="border p-2 rounded flex-1" />
+                  <input type="password" placeholder="Clave temporal" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="border p-2 rounded flex-1" />
+                  <button onClick={handleCreateUser} className="bg-primary text-white px-4 py-2 rounded">Añadir</button>
                 </div>
-                <button
-                  onClick={() => setShowChangePasswordModal(true)}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors flex items-center gap-2"
-                >
-                  <Edit3 className="w-4 h-4" />
-                  Cambiar Contraseña
-                </button>
+                {userError && <p className="text-red-600 text-xs mt-2">{userError}</p>}
               </div>
 
-              {/* Create User */}
-              <div className="bg-fifa-blue/5 border border-fifa-blue/20 rounded-xl p-6 mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <UserPlus className="w-5 h-5 text-primary" />
-                  <h3 className="font-semibold text-text-primary">Crear Nuevo Usuario</h3>
-                </div>
-                <p className="text-sm text-text-secondary mb-4">
-                  El usuario deberá cambiar la contraseña en su primer inicio de sesión.
-                </p>
-
-                {userError && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                    <span>{userError}</span>
-                  </div>
-                )}
-
-                {userCreated && (
-                  <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
-                    <UserCheck className="w-5 h-5 flex-shrink-0" />
-                    <span>¡Usuario creado exitosamente!</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-text-primary mb-2">Nombre de Usuario</label>
-                    <input
-                      type="text"
-                      value={newUsername}
-                      onChange={(e) => setNewUsername(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="Mínimo 3 caracteres"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-text-primary mb-2">Contraseña Temporal</label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                      placeholder="Mínimo 6 caracteres"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      onClick={handleCreateUser}
-                      className="w-full bg-primary hover:bg-fifa-blue text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      Crear Usuario
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Users List */}
-              <div className="bg-surface rounded-xl border border-gray-200 overflow-hidden">
-                <div className="flex items-center gap-2 p-6 border-b border-gray-200">
-                  <Users className="w-5 h-5 text-primary" />
-                  <h3 className="font-semibold text-text-primary">Usuarios Registrados</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Usuario</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Rol</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Puntos</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Acciones</th>
+              <div className="border rounded-xl overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-100 text-xs font-bold">
+                    <tr><th className="p-3">Usuario</th><th className="p-3">Puntos</th><th className="p-3">Acciones</th></tr>
+                  </thead>
+                  <tbody className="text-sm divide-y">
+                    {users.map(u => (
+                      <tr key={u.username}>
+                        <td className="p-3">{u.username}</td>
+                        <td className="p-3 font-bold">{u.points || 0}</td>
+                        <td className="p-3 flex gap-2">
+                          <button onClick={() => handleResetPassword(u.username)} className="text-blue-600 underline">Reset</button>
+                          <button onClick={() => handleDeleteUser(u.username)} className="text-red-600 underline">Eliminar</button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {users.map((u) => (
-                        <tr key={u.username} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-3">
-                                <span className="text-sm font-bold text-primary">{u.username[0].toUpperCase()}</span>
-                              </div>
-                              <span className="font-medium text-text-primary">{u.username}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                              u.is_admin ? 'bg-fifa-red/10 text-fifa-red' : 'bg-primary/10 text-primary'
-                            }`}>
-                              {u.is_admin ? 'Admin' : 'Participante'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="font-bold text-text-primary">{u.points || 0}</span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleResetPassword(u.username)}
-                                className="p-2 text-blue-600 hover:text-blue-800 transition-colors"
-                                title={`Resetear contraseña de ${u.username}`}
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-                              
-                              {u.username !== currentUser?.username && (
-                                <button
-                                  onClick={() => handleDeleteUser(u.username)}
-                                  className={`p-2 transition-colors ${
-                                    u.username === 'admin' 
-                                      ? 'text-gray-300 cursor-not-allowed' 
-                                      : 'text-red-600 hover:text-red-800'
-                                  }`}
-                                  title={u.username === 'admin' ? 'No se puede eliminar admin' : 'Eliminar usuario'}
-                                  disabled={u.username === 'admin'}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {users.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="px-6 py-8 text-center text-text-secondary">
-                            No hay usuarios registrados
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
         </div>
       </main>
+      <Footer />
 
-      {/* Modal para resetear contraseña */}
       {showResetModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
-            <h3 className="text-lg font-bold mb-4">Resetear Contraseña</h3>
-            <p className="text-text-secondary mb-4">
-              Usuario: <span className="font-semibold">{selectedUser}</span>
-            </p>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Nueva Contraseña Temporal
-              </label>
-              <input
-                type="password"
-                value={newTempPassword}
-                onChange={(e) => setNewTempPassword(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setShowResetModal(false)
-                  setNewTempPassword('')
-                }}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmResetPassword}
-                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
-              >
-                Resetear Contraseña
-              </button>
-            </div>
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-bold mb-4">Resetear Contraseña de {selectedUser}</h3>
+            <input type="password" value={newTempPassword} onChange={e => setNewTempPassword(e.target.value)} className="w-full border p-2 rounded mb-4" placeholder="Mínimo 6 caracteres" />
+            <div className="flex gap-2"><button onClick={() => setShowResetModal(false)} className="border px-4 py-2 rounded flex-1">Cancelar</button><button onClick={handleConfirmResetPassword} className="bg-primary text-white px-4 py-2 rounded flex-1">Confirmar</button></div>
           </div>
         </div>
       )}
-
-      {/* Modal para cambiar propia contraseña */}
-      {showChangePasswordModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
-            <h3 className="text-lg font-bold mb-4">Cambiar mi Contraseña</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Contraseña Actual
-              </label>
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                placeholder="Tu contraseña actual"
-              />
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Nueva Contraseña
-              </label>
-              <input
-                type="password"
-                value={newPasswordAdmin}
-                onChange={(e) => setNewPasswordAdmin(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-text-primary mb-2">
-                Confirmar Nueva Contraseña
-              </label>
-              <input
-                type="password"
-                value={confirmPasswordAdmin}
-                onChange={(e) => setConfirmPasswordAdmin(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                placeholder="Repite la nueva contraseña"
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setShowChangePasswordModal(false)
-                  setCurrentPassword('')
-                  setNewPasswordAdmin('')
-                  setConfirmPasswordAdmin('')
-                }}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleChangeOwnPassword}
-                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
-              >
-                Cambiar Contraseña
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de confirmación de backup */}
-      {showBackupConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
-            <h3 className="text-lg font-bold mb-4">Confirmar Backup Manual</h3>
-            <p className="text-text-secondary mb-6">
-              ¿Deseas crear una copia de seguridad manual? Se guardará junto con las automáticas.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowBackupConfirm(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleCreateBackup}
-                className="flex-1 bg-primary text-white px-4 py-2 rounded-lg hover:bg-fifa-blue"
-              >
-                Crear Backup
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Footer />
-    </div>
-  )
-}
-
-// Countdown Timer Component
-function CountdownTimer() {
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
-
-  useEffect(() => {
-    const targetDate = new Date('2026-06-11T00:00:00')
-
-    const calculateTimeLeft = () => {
-      const now = new Date()
-      const difference = targetDate.getTime() - now.getTime()
-
-      if (difference > 0) {
-        setTimeLeft({
-          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-          minutes: Math.floor((difference / 1000 / 60) % 60),
-          seconds: Math.floor((difference / 1000) % 60),
-        })
-      }
-    }
-
-    calculateTimeLeft()
-    const timer = setInterval(calculateTimeLeft, 1000)
-
-    return () => clearInterval(timer)
-  }, [])
-
-  return (
-    <div className="grid grid-cols-4 gap-2">
-      {[
-        { value: timeLeft.days, label: 'Días' },
-        { value: timeLeft.hours, label: 'Horas' },
-        { value: timeLeft.minutes, label: 'Min' },
-        { value: timeLeft.seconds, label: 'Seg' },
-      ].map((item, index) => (
-        <div key={index} className="bg-white/20 rounded-lg p-2 text-center">
-          <div className="text-2xl font-bold">{String(item.value).padStart(2, '0')}</div>
-          <div className="text-xs text-white/80">{item.label}</div>
-        </div>
-      ))}
     </div>
   )
 }
