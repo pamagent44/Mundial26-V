@@ -3,10 +3,10 @@
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import { useState, useEffect } from 'react'
-import { Trophy, Medal, Crown, TrendingUp, Calendar, Users, Eye } from 'lucide-react'
+import { Trophy, Medal, Crown, Users, Eye } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { getUsers, getMatches, getAllPredictions } from '@/app/actions'
-import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
+import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 
 interface RankingUser {
   username: string
@@ -22,7 +22,7 @@ interface Match {
   home_score?: number
   away_score?: number
   phase: string
-  match_date: string // ← MODIFICADO
+  match_date: string
 }
 
 interface Prediction {
@@ -35,7 +35,6 @@ interface Prediction {
 }
 
 export default function RankingPage() {
-  const [sortBy, setSortBy] = useState<'points' | 'predictions'>('points')
   const [mounted, setMounted] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [currentUser, setCurrentUser] = useState<{ username: string; isAdmin: boolean } | null>(null)
@@ -109,9 +108,8 @@ export default function RankingPage() {
     }
   })
 
-  const sortedRanking = [...userStats].sort((a, b) =>
-    sortBy === 'points' ? b.points - a.points : b.predictions - a.predictions
-  )
+  // Ordenación nativa fija por puntos de mayor a menor (Imagen-3)
+  const sortedRanking = [...userStats].sort((a, b) => b.points - a.points)
 
   sortedRanking.forEach((user, index) => {
     user.rank = index + 1
@@ -137,32 +135,35 @@ export default function RankingPage() {
           {sortedRanking.length >= 3 && (
             <div className="mb-12 flex justify-center items-end gap-4">
               <div className="text-center">
-                <div className="w-24 h-24 rounded-full bg-gray-300 flex items-center justify-center mb-2 mx-auto shadow"><span className="text-2xl font-bold">2</span></div>
-                <p className="font-bold">{sortedRanking[1]?.username}</p>
+                <div className="w-24 h-24 rounded-full bg-gray-300 flex items-center justify-center mb-2 mx-auto shadow"><span className="text-2xl font-bold text-gray-700">2</span></div>
+                <p className="font-bold text-text-primary">{sortedRanking[1]?.username}</p>
                 <p className="text-xl font-bold text-primary">{sortedRanking[1]?.points} pts</p>
               </div>
               <div className="text-center transform -translate-y-4">
                 <div className="w-28 h-28 rounded-full bg-accent flex items-center justify-center mb-2 mx-auto shadow-lg ring-4 ring-yellow-400"><span className="text-3xl font-bold text-white">1</span></div>
-                <p className="font-bold text-lg">{sortedRanking[0]?.username}</p>
+                <p className="font-bold text-lg text-text-primary">{sortedRanking[0]?.username}</p>
                 <p className="text-2xl font-bold text-accent">{sortedRanking[0]?.points} pts</p>
               </div>
               <div className="text-center">
                 <div className="w-24 h-24 rounded-full bg-amber-600 flex items-center justify-center mb-2 mx-auto shadow"><span className="text-2xl font-bold text-white">3</span></div>
-                <p className="font-bold">{sortedRanking[2]?.username}</p>
+                <p className="font-bold text-text-primary">{sortedRanking[2]?.username}</p>
                 <p className="text-xl font-bold text-primary">{sortedRanking[2]?.points} pts</p>
               </div>
             </div>
           )}
 
-          <div className="flex gap-4 mb-6 justify-center">
-            <button onClick={() => setSortBy('points')} className={`px-6 py-3 rounded-lg font-semibold flex items-center gap-2 ${sortBy === 'points' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}><TrendingUp className="w-5 h-5" /> Puntos</button>
-            <button onClick={() => setSortBy('predictions')} className={`px-6 py-3 rounded-lg font-semibold flex items-center gap-2 ${sortBy === 'predictions' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}><Calendar className="w-5 h-5" /> Predicciones</button>
-          </div>
+          {/* ✅ ELIMINADOS LOS BOTONES EN DESUSO "PUNTOS" Y "PREDICCIONES" (Imagen-3) */}
 
           <div className="bg-surface rounded-2xl shadow-lg overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-50 text-left text-sm text-text-secondary">
-                <tr><th className="px-6 py-4">#</th><th className="px-6 py-4">Usuario</th><th className="px-6 py-4">Puntos</th><th className="px-6 py-4">Predicciones</th><th className="px-6 py-4">Acciones</th></tr>
+                <tr>
+                  <th className="px-6 py-4">#</th>
+                  <th className="px-6 py-4">Usuario</th>
+                  <th className="px-6 py-4">Puntos</th>
+                  <th className="px-6 py-4">Predicciones</th>
+                  <th className="px-6 py-4">Acciones</th>
+                </tr>
               </thead>
               <tbody className="divide-y">
                 {sortedRanking.map((user) => (
@@ -173,7 +174,7 @@ export default function RankingPage() {
                     <td className="px-6 py-4 text-text-secondary">{user.predictions}</td>
                     <td className="px-6 py-4">
                       {isLoggedIn ? (
-                        <button onClick={() => setSelectedUser(user.username)} className="text-primary font-medium hover:underline flex items-center gap-1"><Eye className="w-4 h-4" /> Ver</button>
+                        <button onClick={() => setSelectedUser(user.username)} className="text-primary font-medium hover:underline flex items-center gap-1"><Eye className="w-4 h-4" /> Ver predicciones</button>
                       ) : <span className="text-xs text-text-secondary">Bloqueado</span>}
                     </td>
                   </tr>
@@ -198,16 +199,24 @@ export default function RankingPage() {
                     const isVisible = new Date() >= deadline || currentUser?.isAdmin || currentUser?.username === selectedUser || pred.home_score !== -1
 
                     return (
-                      <div key={idx} className="flex justify-between items-center py-2 border-b last:border-0">
+                      {/* ✅ CORREGIDO: Flex-row idéntico al de la Imagen-2 con alineación lateral del badge verde */}
+                      <div key={idx} className="flex justify-between items-center py-2 border-b last:border-0 border-gray-200">
                         <div className="flex flex-col">
                           <span className="font-medium text-text-primary">{pred.matches?.home_team} vs {pred.matches?.away_team}</span>
                           {!isVisible && (
                             <span className="text-xs text-fifa-red font-semibold">🔒 Bloqueado hasta cierre del bloque</span>
                           )}
                         </div>
-                        <span className="font-mono text-xl font-bold text-primary">
-                          {isVisible ? `${pred.home_score} - ${pred.away_score}` : '🔒 - 🔒'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-primary font-mono text-lg">
+                            {isVisible ? `${pred.home_score} - ${pred.away_score}` : '🔒 - 🔒'}
+                          </span>
+                          {isVisible && pred.points !== undefined && pred.points > 0 && (
+                            <span className="text-xs bg-fifa-green text-white px-2 py-0.5 rounded font-bold">
+                              +{pred.points} pts
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )
                   })}
