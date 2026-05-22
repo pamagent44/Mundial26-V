@@ -108,7 +108,7 @@ export default function RankingPage() {
     }
   })
 
-  // Ordenación nativa fija por puntos de mayor a menor (Imagen-3)
+  // Ordenación nativa fija por puntos de mayor a menor
   const sortedRanking = [...userStats].sort((a, b) => b.points - a.points)
 
   sortedRanking.forEach((user, index) => {
@@ -151,8 +151,6 @@ export default function RankingPage() {
               </div>
             </div>
           )}
-
-          {/* ✅ ELIMINADOS LOS BOTONES EN DESUSO "PUNTOS" Y "PREDICCIONES" (Imagen-3) */}
 
           <div className="bg-surface rounded-2xl shadow-lg overflow-hidden">
             <table className="w-full">
@@ -198,8 +196,8 @@ export default function RankingPage() {
                     
                     const isVisible = new Date() >= deadline || currentUser?.isAdmin || currentUser?.username === selectedUser || pred.home_score !== -1
 
+                    // ✅ CORREGIDO: El comentario de control ahora está fuera del return para no romper la sintaxis JSX
                     return (
-                      {/* ✅ CORREGIDO: Flex-row idéntico al de la Imagen-2 con alineación lateral del badge verde */}
                       <div key={idx} className="flex justify-between items-center py-2 border-b last:border-0 border-gray-200">
                         <div className="flex flex-col">
                           <span className="font-medium text-text-primary">{pred.matches?.home_team} vs {pred.matches?.away_team}</span>
