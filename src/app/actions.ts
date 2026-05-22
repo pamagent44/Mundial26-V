@@ -1,7 +1,7 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { fixMatchPhase } from '@/lib/utils/matchPhaseMapper'
+import { fixMatchPhase, getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
 
 // ==================== USUARIOS ====================
 
@@ -9,7 +9,6 @@ export async function createUser(username: string, password: string, isAdmin = f
   if (!username || username.length < 3) {
     throw new Error('El usuario debe tener al menos 3 caracteres')
   }
-
   if (!password || password.length < 6) {
     throw new Error('La contraseña debe tener al menos 6 caracteres')
   }
@@ -50,7 +49,6 @@ export async function loginUser(username: string, password: string) {
   if (error || !data) {
     throw new Error('Usuario o contraseña incorrectos')
   }
-
   return data
 }
 
@@ -58,7 +56,7 @@ export async function getUsers() {
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('*')
-    .neq('username', 'admin')  // ← FILTRA: EXCLUYE al usuario 'admin'
+    .neq('username', 'admin')
     .order('points', { ascending: false })
 
   if (error) throw new Error(error.message)
@@ -100,11 +98,7 @@ export async function deleteUser(username: string) {
     .delete()
     .eq('username', username)
 
-  if (error) {
-    console.error('Error eliminando usuario:', error)
-    throw new Error('Error al eliminar usuario: ' + error.message)
-  }
-
+  if (error) throw new Error('Error al eliminar usuario: ' + error.message)
   return { success: true, message: `Usuario ${username} eliminado correctamente` }
 }
 
@@ -158,11 +152,7 @@ export async function createMatch(
   return data
 }
 
-export async function updateMatchResult(
-  matchId: string,
-  homeScore: number,
-  awayScore: number
-) {
+export async function updateMatchResult(matchId: string, homeScore: number, awayScore: number) {
   const { data, error } = await supabaseAdmin
     .from('matches')
     .update({
@@ -174,29 +164,28 @@ export async function updateMatchResult(
     .select()
 
   if (error) throw new Error(error.message)
-
-  // Recalcular de forma automática tras modificar un partido
   await recalculateAllRankings()
-
   return data
 }
 
 // ==================== PREDICCIONES ====================
 
-export async function createPrediction(
-  userId: string,
-  matchId: string,
-  homeScore: number,
-  awayScore: number
-) {
+export async function createPrediction(userId: string, matchId: string, homeScore: number, awayScore: number) {
   const { data: match } = await supabaseAdmin
     .from('matches')
-    .select('status')
+    .select('status, match_date')
     .eq('id', matchId)
     .single()
 
-  if (!match || match.status !== 'upcoming') {
-    throw new Error('No se pueden hacer predicciones en partidos finalizados')
+  if (!match) throw new Error('Partido no encontrado')
+
+  const deadline = getMatchDeadline(match.match_date)
+  if (new Date() >= deadline) {
+    throw new Error('El tiempo para realizar o editar predicciones sobre este partido ha expirado.')
+  }
+
+  if (match.status !== 'upcoming') {
+    throw new Error('No se pueden hacer predicciones en partidos finalizados o en juego')
   }
 
   const { data: existing } = await supabaseAdmin
@@ -237,15 +226,7 @@ export async function getUserPredictions(userId: string) {
     .from('predictions')
     .select(`
       *,
-      matches (
-        home_team,
-        away_team,
-        home_score,
-        away_score,
-        phase,
-        match_date,
-        status
-      )
+      matches ( home_team, away_team, home_score, away_score, phase, match_date, status )
     `)
     .eq('user_id', userId)
 
@@ -253,7 +234,16 @@ export async function getUserPredictions(userId: string) {
   return data
 }
 
-export async function getAllPredictions() {
+export async function getAllPredictions(requestingUser?: string) {
+  const { data: userData } = requestingUser ? await supabaseAdmin
+    .from('users')
+    .select('is_admin')
+    .eq('username', requestingUser)
+    .single() : { data: null }
+
+  const isAdmin = userData?.is_admin ?? false
+  const now = new Date()
+
   const { data, error } = await supabaseAdmin
     .from('predictions')
     .select(`
@@ -263,17 +253,25 @@ export async function getAllPredictions() {
     `)
 
   if (error) throw new Error(error.message)
-  return data
-}
 
-const PHASE_REVEAL_DATES: Record<string, string> = {
-  groups:        '2026-06-11T00:00:00Z',
-  Dieciseisavos: '2026-06-28T00:00:00Z',
-  round16:       '2026-07-04T00:00:00Z',
-  quarterfinals: '2026-07-09T00:00:00Z',
-  semifinals:    '2026-07-14T00:00:00Z',
-  thirdplace:    '2026-07-18T00:00:00Z',
-  final:         '2026-07-19T00:00:00Z',
+  return data?.map((pred: any) => {
+    if (isAdmin || !requestingUser || pred.user_id === requestingUser) {
+      return pred
+    }
+    const matchDate = pred.matches?.match_date
+    if (matchDate) {
+      const deadline = getMatchDeadline(matchDate)
+      if (now < deadline) {
+        return {
+          ...pred,
+          home_score: -1, 
+          away_score: -1,
+          is_hidden_by_server: true
+        }
+      }
+    }
+    return pred
+  }) || []
 }
 
 export async function getVisiblePredictionsForPhase(requestingUser: string, phase: string) {
@@ -284,34 +282,30 @@ export async function getVisiblePredictionsForPhase(requestingUser: string, phas
     .single()
 
   const isAdmin = userData?.is_admin ?? false
-
-  const revealDate = PHASE_REVEAL_DATES[phase]
-  const phaseVisible = !revealDate || new Date() >= new Date(revealDate)
+  const now = new Date()
 
   let query = supabaseAdmin
     .from('predictions')
     .select(`
       *,
       users (username),
-      matches!inner (
-        id, home_team, away_team, match_date, phase,
-        home_score, away_score, status
-      )
+      matches!inner ( id, home_team, away_team, match_date, phase, home_score, away_score, status )
     `)
     .eq('matches.phase', phase)
-
-  if (!phaseVisible && !isAdmin) {
-    query = query.eq('user_id', requestingUser)
-  }
 
   const { data, error } = await query
   if (error) throw new Error(error.message)
 
-  return {
-    data,
-    phaseVisible,
-    revealDate: revealDate ?? null,
-  }
+  const processed = data?.map((pred: any) => {
+    const deadline = getMatchDeadline(pred.matches.match_date)
+    const isVisible = now >= deadline || isAdmin || pred.user_id === requestingUser
+    if (!isVisible) {
+      return { ...pred, home_score: -1, away_score: -1 }
+    }
+    return pred
+  })
+
+  return { data: processed, phaseVisible: true, revealDate: null }
 }
 
 // ==================== RANKING ====================
@@ -319,12 +313,7 @@ export async function getVisiblePredictionsForPhase(requestingUser: string, phas
 export async function getRankings() {
   const { data, error } = await supabaseAdmin
     .from('rankings')
-    .select(`
-      *,
-      users (
-        username
-      )
-    `)
+    .select(`*, users ( username )`)
     .order('total_points', { ascending: false })
 
   if (error) throw new Error(error.message)
@@ -353,7 +342,6 @@ export async function recalculateAllRankings() {
       .select('username')
 
     if (error) throw error
-
     if (allUsers) {
       for (const user of allUsers) {
         await calculateUserPoints(user.username)
@@ -361,7 +349,6 @@ export async function recalculateAllRankings() {
     }
     return { success: true, message: 'Todos los rankings globales y puntos han sido actualizados con éxito.' }
   } catch (error: any) {
-    console.error('Error recalculando rankings globales:', error)
     throw new Error('Error al actualizar rankings: ' + error.message)
   }
 }
@@ -369,68 +356,41 @@ export async function recalculateAllRankings() {
 export async function calculateUserPoints(userId: string) {
   const { data: predictions } = await supabaseAdmin
     .from('predictions')
-    .select(`
-      *,
-      matches (*)
-    `)
+    .select(`*, matches (*)`)
     .eq('user_id', userId)
 
   if (!predictions) return 0
 
   let totalPoints = 0
-
-  // Mapeo secuencial para calcular la distancia de saltos del 1X2 (1 = Local, 2 = Empate, 3 = Visitante)
-  const signValueMap: Record<string, number> = {
-    'home': 1,
-    'draw': 2,
-    'away': 3
-  }
+  const signValueMap: Record<string, number> = { 'home': 1, 'draw': 2, 'away': 3 }
 
   for (const pred of predictions) {
     const match = pred.matches
-    
-    // Permitir cálculo en pruebas si hay datos de puntuación
     if (!match || match.home_score === null || match.away_score === null) continue
 
     let points = 0
-
-    // 1. Determinar el signo real y el signo predicho
     const actualResult = match.home_score > match.away_score ? 'home' :
                          match.home_score < match.away_score ? 'away' : 'draw'
     const predictedResult = pred.home_score > pred.away_score ? 'home' :
                            pred.home_score < pred.away_score ? 'away' : 'draw'
 
-    // 2. Calcular la distancia de saltos en base a la quiniela (1 - X - 2)
     const actualVal = signValueMap[actualResult]
     const predictedVal = signValueMap[predictedResult]
     const jumpDistance = Math.abs(actualVal - predictedVal)
 
-    if (jumpDistance === 0) {
-      points += 5 // Resultado Exacto (1X2)
-    } else if (jumpDistance === 1) {
-      points += 2 // CORREGIDO: Cercano al Resultado (1X2) -> Exactamente 1 salto de distancia
-    }
+    if (jumpDistance === 0) points += 5
+    else if (jumpDistance === 1) points += 2
 
-    // 3. Reglas de goles por equipo (Se mantienen intactas sin tocar)
     if (pred.home_score === match.home_score) points += 3
     else if (Math.abs(pred.home_score - match.home_score) === 1) points += 1
 
     if (pred.away_score === match.away_score) points += 3
     else if (Math.abs(pred.away_score - match.away_score) === 1) points += 1
 
-    // 4. Multiplicadores por fase
     const multipliers: Record<string, number> = {
-      'groups': 1,
-      'Dieciseisavos': 2,
-      'round16': 2,
-      'quarterfinals': 3,
-      'semifinals': 4,
-      'final': 5,
-      'thirdplace': 4
+      'groups': 1, 'Dieciseisavos': 2, 'round16': 2, 'quarterfinals': 3, 'semifinals': 4, 'final': 5, 'thirdplace': 4
     }
-
     const multiplier = multipliers[match.phase as string] || 1
-
     totalPoints += points * multiplier
 
     await supabaseAdmin
@@ -447,38 +407,24 @@ export async function calculateUserPoints(userId: string) {
   return totalPoints
 }
 
-// ==================== FOOTBALL-DATA.ORG API ====================
+// ==================== SINCRO & BACKUPS ====================
 
 export async function syncMatchesFromAPI() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
-
-  if (!apiKey) {
-    throw new Error('FOOTBALL_DATA_API_KEY no configurada. Obtén una gratis en football-data.org')
-  }
+  if (!apiKey) throw new Error('FOOTBALL_DATA_API_KEY no configurada.')
 
   try {
     const response = await fetch('https://api.football-data.org/v4/competitions/WC/matches', {
-      headers: {
-        'X-Auth-Token': apiKey
-      }
+      headers: { 'X-Auth-Token': apiKey }
     })
-
-    if (!response.ok) {
-      if (response.status === 403) {
-        throw new Error('API Key inválida o sin acceso al Mundial 2026')
-      }
-      throw new Error(`Error API: ${response.status}`)
-    }
+    if (!response.ok) throw new Error(`Error API: ${response.status}`)
 
     const data = await response.json()
     const matches = data.matches || []
-
-    let inserted = 0
-    let updated = 0
+    let inserted = 0, updated = 0
 
     for (const match of matches) {
       const correctedPhase = mapPhaseWithCorrection(match)
-      
       const matchData = {
         home_team: match.homeTeam?.name || 'Por definir',
         away_team: match.awayTeam?.name || 'Por definir',
@@ -499,29 +445,16 @@ export async function syncMatchesFromAPI() {
         .single()
 
       if (existing) {
-        await supabaseAdmin
-          .from('matches')
-          .update(matchData)
-          .eq('id', existing.id)
+        await supabaseAdmin.from('matches').update(matchData).eq('id', existing.id)
         updated++
       } else {
-        await supabaseAdmin
-          .from('matches')
-          .insert([matchData])
+        await supabaseAdmin.from('matches').insert([matchData])
         inserted++
       }
     }
 
-    if (inserted > 0 || updated > 0) {
-      await recalculateAllRankings()
-    }
-
-    return {
-      success: true,
-      total: matches.length,
-      inserted,
-      updated
-    }
+    if (inserted > 0 || updated > 0) await recalculateAllRankings()
+    return { success: true, total: matches.length, inserted, updated }
   } catch (err: any) {
     throw new Error('Error sincronizando: ' + err.message)
   }
@@ -529,21 +462,13 @@ export async function syncMatchesFromAPI() {
 
 export async function updateLiveScores() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
-
-  if (!apiKey) {
-    throw new Error('FOOTBALL_DATA_API_KEY no configurada')
-  }
+  if (!apiKey) throw new Error('FOOTBALL_DATA_API_KEY no configurada')
 
   try {
     const response = await fetch('https://api.football-data.org/v4/competitions/WC/matches?status=LIVE,FINISHED', {
-      headers: {
-        'X-Auth-Token': apiKey
-      }
+      headers: { 'X-Auth-Token': apiKey }
     })
-
-    if (!response.ok) {
-      throw new Error(`Error API: ${response.status}`)
-    }
+    if (!response.ok) throw new Error(`Error API: ${response.status}`)
 
     const data = await response.json()
     const matches = data.matches || []
@@ -551,7 +476,6 @@ export async function updateLiveScores() {
     for (const match of matches) {
       const homeScore = match.score?.fullTime?.home
       const awayScore = match.score?.fullTime?.away
-
       if (homeScore !== null && awayScore !== null) {
         await supabaseAdmin
           .from('matches')
@@ -565,81 +489,40 @@ export async function updateLiveScores() {
       }
     }
 
-    if (matches.length > 0) {
-      await recalculateAllRankings()
-    }
-
+    if (matches.length > 0) await recalculateAllRankings()
     return { success: true, count: matches.length }
   } catch (err: any) {
     throw new Error('Error actualizando: ' + err.message)
   }
 }
 
-// ==================== COPIA DE SEGURIDAD DE PREDICCIONES ====================
-
 export async function createPredictionBackup() {
   try {
     const { data: predictions, error } = await supabaseAdmin
       .from('predictions')
-      .select(`
-        id,
-        home_score,
-        away_score,
-        points,
-        users (username),
-        matches (
-          id,
-          home_team,
-          away_team,
-          match_date,
-          phase,
-          home_score,
-          away_score,
-          status
-        )
-      `)
+      .select(`id, home_score, away_score, points, users (username), matches (*)`)
 
     if (error) throw error
-
     const backupData = {
       created_at: new Date().toISOString(),
       total_predictions: predictions?.length || 0,
       predictions: predictions?.map((p: any) => ({
-        prediction_id: p.id,
-        user_id: p.users?.username,
-        match_id: p.matches?.id,
-        home_team: p.matches?.home_team,
-        away_team: p.matches?.away_team,
-        predicted_home: p.home_score,
-        predicted_away: p.away_score,
-        actual_home: p.matches?.home_score,
-        actual_away: p.matches?.away_score,
-        points_earned: p.points,
-        match_status: p.matches?.status,
-        match_date: p.matches?.match_date,
-        phase: p.matches?.phase
-      })) || []
+        prediction_id: p.id, user_id: p.users?.username, match_id: p.matches?.id,
+        home_team: p.matches?.home_team, away_team: p.matches?.away_team,
+        predicted_home: p.home_score, predicted_away: p.away_score,
+        actual_home: p.matches?.home_score, actual_away: p.matches?.away_score,
+        points_earned: p.points, match_status: p.matches?.status, phase: p.matches?.phase
+      }))
     }
 
-    const { data: backup, error: insertError } = await supabaseAdmin
+    const { data: backup, error: insErr } = await supabaseAdmin
       .from('prediction_backups')
-      .insert([{
-        backup_data: backupData,
-        backup_type: 'auto'
-      }])
-      .select()
+      .insert([{ backup_data: backupData, backup_type: 'auto' }]).select()
 
-    if (insertError) throw insertError
-
+    if (insErr) throw insErr
     await supabaseAdmin.rpc('cleanup_old_backups')
-
-    return { 
-      success: true, 
-      backup: backup?.[0],
-      message: `Backup creado: ${backupData.total_predictions} predicciones guardadas`
-    }
+    return { success: true, backup: backup?.[0], message: `Backup creado correctamente` }
   } catch (error: any) {
-    console.error('Error creando backup:', error)
     throw new Error('Error al crear backup: ' + error.message)
   }
 }
@@ -647,147 +530,80 @@ export async function createPredictionBackup() {
 export async function getLatestBackup() {
   try {
     const { data, error } = await supabaseAdmin
-      .from('prediction_backups')
-      .select('*')
-      .order('backup_date', { ascending: false })
-      .limit(1)
-      .single()
-
+      .from('prediction_backups').select('*').order('backup_date', { ascending: false }).limit(1).single()
     if (error) throw error
     return { success: true, backup: data }
   } catch (error: any) {
-    if (error.message?.includes('no rows')) {
-      return { success: false, message: 'No hay backups disponibles' }
-    }
-    throw new Error('Error al obtener backup: ' + error.message)
+    return { success: false, message: 'No hay backups disponibles' }
   }
 }
 
 export async function getAllBackups() {
   try {
     const { data, error } = await supabaseAdmin
-      .from('prediction_backups')
-      .select('*')
-      .order('backup_date', { ascending: false })
-      .limit(3)
-
+      .from('prediction_backups').select('*').order('backup_date', { ascending: false }).limit(3)
     if (error) throw error
     return { success: true, backups: data }
   } catch (error: any) {
-    throw new Error('Error al obtener backups: ' + error.message)
+    throw new Error(error.message)
   }
 }
 
 export async function restorePredictionBackup(backupId: number) {
   try {
-    const { data: backup, error: fetchError } = await supabaseAdmin
-      .from('prediction_backups')
-      .select('*')
-      .eq('id', backupId)
-      .single()
-
-    if (fetchError) throw fetchError
+    const { data: backup, error: fErr } = await supabaseAdmin
+      .from('prediction_backups').select('*').eq('id', backupId).single()
+    if (fErr) throw fErr
 
     const backupData = backup.backup_data
-    let restored = 0
-    let failed = 0
+    let restored = 0, failed = 0
 
     for (const pred of backupData.predictions) {
-      const { data: match } = await supabaseAdmin
-        .from('matches')
-        .select('id, status')
-        .eq('id', pred.match_id)
-        .single()
+      const { data: match } = await supabaseAdmin.from('matches').select('id, status').eq('id', pred.match_id).single()
+      if (!match || match.status === 'finished') continue
 
-      if (!match || match.status === 'finished') {
-        continue
-      }
-
-      const { error: upsertError } = await supabaseAdmin
+      const { error: upErr } = await supabaseAdmin
         .from('predictions')
-        .upsert({
-          user_id: pred.user_id,
-          match_id: pred.match_id,
-          home_score: pred.predicted_home,
-          away_score: pred.predicted_away,
-          points: 0
-        }, { onConflict: 'user_id,match_id' })
+        .upsert({ user_id: pred.user_id, match_id: pred.match_id, home_score: pred.predicted_home, away_score: pred.predicted_away, points: 0 }, { onConflict: 'user_id,match_id' })
 
-      if (upsertError) {
-        failed++
-      } else {
-        restored++
-      }
+      if (upErr) failed++
+      else restored++
     }
-
-    return {
-      success: true,
-      restored,
-      failed,
-      message: `Restauradas ${restored} predicciones, ${failed} fallidas`
-    }
+    return { success: true, restored, failed }
   } catch (error: any) {
     throw new Error('Error al restaurar backup: ' + error.message)
   }
 }
 
 export async function scheduledBackup() {
-  'use server'
-  
-  console.log('🔄 Ejecutando backup programado...', new Date().toISOString())
-  
   try {
-    const result = await createPredictionBackup()
-    console.log('✅ Backup completado:', result.message)
-    return result
+    return await createPredictionBackup()
   } catch (error: any) {
-    console.error('❌ Error en backup programado:', error.message)
     return { success: false, error: error.message }
   }
 }
 
-// ==================== FUNCIONES AUXILIARES ====================
-
 function mapPhaseWithCorrection(match: any): string {
   const apiStage = match.stage
-  
   if (apiStage && apiStage !== 'GROUP_STAGE') {
     const directPhase = mapKnownPhase(apiStage)
-    if (directPhase !== 'groups') {
-      return directPhase
-    }
+    if (directPhase !== 'groups') return directPhase
   }
-  
-  return fixMatchPhase({
-    stage: apiStage,
-    phase: match.phase,
-    utcDate: match.utcDate
-  })
+  return fixMatchPhase({ stage: apiStage, phase: match.phase, utcDate: match.utcDate })
 }
 
 function mapKnownPhase(stage: string): string {
   const phaseMap: Record<string, string> = {
-    'GROUP_STAGE': 'groups',
-    'ROUND_OF_32': 'Dieciseisavos',
-    'ROUND_OF_16': 'round16',
-    'QUARTER_FINALS': 'quarterfinals',
-    'SEMI_FINALS': 'semifinals',
-    'FINAL': 'final',
-    'THIRD_PLACE': 'thirdplace'
+    'GROUP_STAGE': 'groups', 'ROUND_OF_32': 'Dieciseisavos', 'ROUND_OF_16': 'round16',
+    'QUARTER_FINALS': 'quarterfinals', 'SEMI_FINALS': 'semifinals', 'FINAL': 'final', 'THIRD_PLACE': 'thirdplace'
   }
   return phaseMap[stage] || 'groups'
 }
 
 function mapStatus(status: string): string {
   const statusMap: Record<string, string> = {
-    'SCHEDULED': 'upcoming',
-    'TIMED': 'upcoming',
-    'IN_PLAY': 'live',
-    'PAUSED': 'live',
-    'FINISHED': 'finished',
-    'POSTPONED': 'upcoming',
-    'CANCELLED': 'upcoming',
-    'SUSPENDED': 'upcoming'
+    'SCHEDULED': 'upcoming', 'TIMED': 'upcoming', 'IN_PLAY': 'live',
+    'PAUSED': 'live', 'FINISHED': 'finished', 'POSTPONED': 'upcoming'
   }
   return statusMap[status] || 'upcoming'
 }
