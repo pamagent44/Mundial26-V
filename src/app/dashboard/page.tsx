@@ -15,7 +15,7 @@ import {
   deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword,
   recalculateAllRankings
 } from '@/app/actions'
-import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
+import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 
 // Types
 interface Match {
@@ -44,8 +44,8 @@ const PHASES = [
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
-  { key: 'final', label: 'Final', multiplier: 5 },
-  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 },
+  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 }, // ← INTERCAMBIADO: Imagen-1 (3er lugar va primero)
+  { key: 'final', label: 'Final', multiplier: 5 },          // ← INTERCAMBIADO: Imagen-1 (Final va después)
 ]
 
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
@@ -254,7 +254,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } fillar: {
+    } finally {
       setLoading(false)
     }
   }
@@ -352,7 +352,7 @@ export default function DashboardPage() {
     try {
       await updatePassword(currentUser!.username, newPasswordAdmin)
       setShowChangePasswordModal(false)
-      alert('Contraseña actualizada')
+      alert('Contraseña actualizada con éxito')
     } catch (err: any) {
       alert(err.message)
     }
@@ -548,6 +548,21 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* ✅ RESTAURADO: Contenedor para que el administrador cambie su propia contraseña (Imagen-4) */}
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-text-primary">Mi Contraseña</h3>
+                  <p className="text-sm text-text-secondary">Cambia tu contraseña de administrador de forma segura</p>
+                </div>
+                <button
+                  onClick={() => setShowChangePasswordModal(true)}
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors flex items-center gap-2 text-sm font-semibold"
+                >
+                  <Edit3 className="w-4 h-4" />
+                  Cambiar Contraseña
+                </button>
+              </div>
+
               <div className="p-4 bg-gray-50 border rounded-xl">
                 <h3 className="font-bold mb-4">Crear Participante</h3>
                 <div className="flex gap-2">
@@ -589,6 +604,22 @@ export default function DashboardPage() {
             <h3 className="text-lg font-bold mb-4">Resetear Contraseña de {selectedUser}</h3>
             <input type="password" value={newTempPassword} onChange={e => setNewTempPassword(e.target.value)} className="w-full border p-2 rounded mb-4" placeholder="Mínimo 6 caracteres" />
             <div className="flex gap-2"><button onClick={() => setShowResetModal(false)} className="border px-4 py-2 rounded flex-1">Cancelar</button><button onClick={handleConfirmResetPassword} className="bg-primary text-white px-4 py-2 rounded flex-1">Confirmar</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para cambiar contraseña Admin */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold mb-4">Cambiar mi Contraseña</h3>
+            <input type="password" placeholder="Contraseña Actual" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full border p-2 rounded mb-3" />
+            <input type="password" placeholder="Nueva Contraseña" value={newPasswordAdmin} onChange={e => setNewPasswordAdmin(e.target.value)} className="w-full border p-2 rounded mb-3" />
+            <input type="password" placeholder="Confirmar Nueva Contraseña" value={confirmPasswordAdmin} onChange={e => setConfirmPasswordAdmin(e.target.value)} className="w-full border p-2 rounded mb-4" />
+            <div className="flex gap-2">
+              <button onClick={() => setShowChangePasswordModal(false)} className="border px-4 py-2 rounded flex-1">Cancelar</button>
+              <button onClick={handleChangeOwnPassword} className="bg-primary text-white px-4 py-2 rounded flex-1">Actualizar</button>
+            </div>
           </div>
         </div>
       )}
