@@ -13,8 +13,9 @@ import {
 import { 
   createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
   deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword,
-  recalculateAllRankings, getMatchDeadline // ← Importados correctamente
+  recalculateAllRankings
 } from '@/app/actions'
+import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
 
 // Types
 interface Match {
@@ -57,7 +58,6 @@ const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   final:         { start: new Date('2026-07-19T00:00:00Z'), end: new Date('2026-07-19T23:59:59Z') },
 }
 
-// Estructura estática de los 8 bloques límites de control operativo
 const DEADLINE_BLOCKS = [
   { label: 'Fase de Grupos (Bloque 1)', date: new Date('2026-06-10T23:30:00Z') },
   { label: 'Fase de Grupos (Bloque 2)', date: new Date('2026-06-17T23:30:00Z') },
@@ -69,9 +69,6 @@ const DEADLINE_BLOCKS = [
   { label: 'Final y 3er Puesto', date: new Date('2026-07-17T23:30:00Z') },
 ]
 
-/**
- * COMPONENTE RECOLECTOR DE PARTIDO INDIVIDUAL (PREDICCIONES)
- */
 function MatchCountdown({ deadline }: { deadline: Date }) {
   const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null)
   const [isBlocked, setIsBlocked] = useState(false)
@@ -112,10 +109,6 @@ function MatchCountdown({ deadline }: { deadline: Date }) {
   )
 }
 
-/**
- * MEJORA: COMPONENTE DINÁMICO DEL TEMPORIZADOR GLOBAL EN DASHBOARD
- * Encuentra de forma reactiva el siguiente bloque operativo y renderiza su cuenta atrás.
- */
 function DashboardDeadlineTimer() {
   const [currentBlock, setCurrentBlock] = useState<{ label: string; date: Date } | null>(null)
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
@@ -124,7 +117,6 @@ function DashboardDeadlineTimer() {
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date()
-      // Buscar el primer bloque temporal cuya fecha límite sea mayor al momento actual
       const activeBlock = DEADLINE_BLOCKS.find(b => b.date.getTime() > now.getTime())
 
       if (!activeBlock) {
@@ -262,7 +254,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } finally {
+    } fillar: {
       setLoading(false)
     }
   }
@@ -404,18 +396,6 @@ export default function DashboardPage() {
     }
   }
 
-  const handleDownloadBackup = async () => {
-    setDownloading(true)
-    const result = await getLatestBackup()
-    if (result.success && result.backup) {
-      const blob = new Blob([JSON.stringify(result.backup.backup_data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = 'backup.json'; a.click()
-    }
-    setDownloading(false)
-  }
-
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <Navbar />
@@ -442,7 +422,6 @@ export default function DashboardPage() {
 
           {activeTab === 'dashboard' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* CAMBIADO: Reemplazado por el componente dinámico adaptativo de bloques */}
               <div className="lg:col-span-1 bg-gradient-to-br from-primary to-fifa-green rounded-2xl p-6 text-white shadow-lg flex flex-col justify-center">
                 <div className="flex items-center gap-2 mb-4">
                   <Clock className="w-6 h-6" />
