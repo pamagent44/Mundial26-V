@@ -5,7 +5,8 @@ import Footer from '@/components/Footer'
 import { useState, useEffect } from 'react'
 import { Trophy, Medal, Crown, TrendingUp, Calendar, Users, Eye } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { getUsers, getMatches, getAllPredictions, getMatchDeadline } from '@/app/actions' // ← IMPORTADO: getMatchDeadline
+import { getUsers, getMatches, getAllPredictions } from '@/app/actions'
+import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
 
 interface RankingUser {
   username: string
@@ -21,7 +22,7 @@ interface Match {
   home_score?: number
   away_score?: number
   phase: string
-  match_date: string // ← CAMBIADO: Asegura tener la propiedad de fecha
+  match_date: string // ← MODIFICADO
 }
 
 interface Prediction {
@@ -69,7 +70,6 @@ export default function RankingPage() {
 
   const loadData = async (reqUser?: string) => {
     try {
-      // Pasamos el usuario solicitante para enmascaramiento seguro en el backend
       const [usersData, predictionsData, matchesData] = await Promise.all([
         getUsers(),
         getAllPredictions(reqUser),
@@ -195,7 +195,6 @@ export default function RankingPage() {
                     const matchDate = pred.matches?.match_date
                     const deadline = matchDate ? getMatchDeadline(matchDate) : new Date()
                     
-                    // REGLA DE VISIBILIDAD: El bloqueo expira automáticamente al vencer el contador
                     const isVisible = new Date() >= deadline || currentUser?.isAdmin || currentUser?.username === selectedUser || pred.home_score !== -1
 
                     return (
