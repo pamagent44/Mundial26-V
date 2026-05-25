@@ -107,7 +107,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-bold text-text-primary mb-3">Premios Increíbles</h3>
                 <p className="text-text-secondary">
-                  1º lugar: 60%, 2º: 30%, 3º: 10% del bote total. ¡Demuestra que eres el mejor predictor!
+                  1º lugar: 50%, 2º: 35%, 3º: 15% del bote total. ¡Demuestra que eres el mejor predictor!
                 </p>
               </div>
 
@@ -129,7 +129,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-bold text-text-primary mb-3">Multiplicadores</h3>
                 <p className="text-text-secondary">
-                  Grupos x1, Octavos x2, Cuartos x3, Semifinal x4, Final x5. ¡La final vale mucho!
+                  Grupos x1, Dieciseisavos x2, Octavos x3, Cuartos x4, Semifinal x5, 3r lugar x5 y Final x6. ¡La final vale mucho!
                 </p>
               </div>
 
@@ -162,7 +162,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-bold text-text-primary mb-3">Fases Detalladas</h3>
                 <p className="text-text-secondary">
-                  Grupos, Octavos, Cuartos, Semifinal, Final y 3er lugar. Cada fase tiene su encanto.
+                  Grupos, Dieciseisavos, Octavos, Cuartos, Semifinal, 3er lugar y Final. Cada fase tiene su encanto.
                 </p>
               </div>
             </div>
