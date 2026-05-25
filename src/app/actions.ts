@@ -388,7 +388,7 @@ export async function calculateUserPoints(userId: string) {
     else if (Math.abs(pred.away_score - match.away_score) === 1) points += 1
 
     const multipliers: Record<string, number> = {
-      'groups': 1, 'Dieciseisavos': 2, 'round16': 2, 'quarterfinals': 3, 'semifinals': 4, 'final': 5, 'thirdplace': 4
+      'groups': 1, 'Dieciseisavos': 2, 'round16': 3, 'quarterfinals': 4, 'semifinals': 5, 'final': 6, 'thirdplace': 5
     }
     const multiplier = multipliers[match.phase as string] || 1
     totalPoints += points * multiplier
