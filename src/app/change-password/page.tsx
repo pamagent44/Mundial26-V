@@ -43,7 +43,7 @@ export default function ChangePasswordPage() {
     setSuccess('')
 
     if (newPassword.length < 4) {
-      setError('La nueva contraseña debe tener al menos 4 caracteres')
+      setError('La nueva contraseña debe tener al menos 6 caracteres')
       return
     }
 
@@ -132,7 +132,7 @@ export default function ChangePasswordPage() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all pr-12"
-                    placeholder="Mínimo 4 caracteres"
+                    placeholder="Mínimo 6 caracteres"
                     required
                     minLength={4}
                   />
@@ -144,7 +144,7 @@ export default function ChangePasswordPage() {
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
-                <p className="text-xs text-text-secondary mt-1">Mínimo 4 caracteres</p>
+                <p className="text-xs text-text-secondary mt-1">Mínimo 6 caracteres</p>
               </div>
 
               <div>
