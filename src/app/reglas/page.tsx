@@ -142,11 +142,11 @@ export default function RulesPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {[
                   { phase: 'Fase de Grupos', multiplier: 1, icon: '🔵' },
-                  { phase: 'Dieciseisavos y Octavos', multiplier: 2, icon: '🟠' }, // ← CAMBIADO: 'Octavos de Final' por 'Dieciseisavos y Octavos'
-                  { phase: 'Cuartos de Final', multiplier: 3, icon: '🟡' },
-                  { phase: 'Semifinales', multiplier: 4, icon: '🟣' },
-                  { phase: 'Final', multiplier: 5, icon: '⭐' },
-                  { phase: '3er Lugar', multiplier: 4, icon: '🟢' },
+                  { phase: 'Dieciseisavos', multiplier: 2, icon: '🟠' }, 
+                  { phase: 'Octavos', multiplier: 3, icon: '🟡' },
+                  { phase: 'Cuartos', multiplier: 4, icon: '🟣' },
+                  { phase: 'Semifinales y 3er Lugar', multiplier: 5, icon: '⭐' },
+                  { phase: 'Final', multiplier: 6, icon: '🟢' },
                 ].map((item) => (
                   <div key={item.phase} className="bg-gray-50 rounded-xl p-4 text-center border border-gray-200">
                     <div className="text-3xl mb-2">{item.icon}</div>
