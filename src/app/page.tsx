@@ -107,7 +107,7 @@ export default function Home() {
                 </div>
                 <h3 className="text-xl font-bold text-text-primary mb-3">Premios Increíbles</h3>
                 <p className="text-text-secondary">
-                  1º lugar: 50%, 2º: 35%, 3º: 15% del bote total. ¡Demuestra que eres el mejor predictor!
+                  1º lugar: 40%, 2º: 25%, 3º: 15%, 4º: 12%, 5º: 8% del bote total. ¡Demuestra que eres el mejor predictor! Los premios se redondean.
                 </p>
               </div>
 
