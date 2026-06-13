@@ -236,7 +236,16 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isAdmin) loadBackupInfo()
   }, [isAdmin])
-
+  // ========================================================
+  // 👇 PEGA AQUÍ LA SOLUCIÓN B 👇
+  // ========================================================
+  useEffect(() => {
+    if (currentUser?.username) {
+      loadData(currentUser.username)
+    }
+  }, [activeTab]) // Se ejecutará cada vez que el usuario pulse una pestaña diferente
+  // ========================================================
+  
   const loadData = async (username: string) => {
     try {
       const [matchesData, usersData, predictionsData] = await Promise.all([
@@ -275,6 +284,8 @@ export default function DashboardPage() {
       await createPrediction(currentUser.username, matchId, tempPrediction.homeScore, tempPrediction.awayScore)
       setPredictions({ ...predictions, [matchId]: tempPrediction })
       setEditingMatch(null)
+      // ⚡ MEJORA RECOLECTORA: Fuerza a la web a pedir los nuevos conteos y puntos de inmediato
+      await loadData(currentUser.username)
     } catch (err: any) {
       alert(err.message)
     }
