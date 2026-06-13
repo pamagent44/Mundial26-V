@@ -251,6 +251,7 @@ export async function getAllPredictions(requestingUser?: string) {
       users (username),
       matches (*)
     `)
+    .range(0, 10000)
 
   if (error) throw new Error(error.message)
 
