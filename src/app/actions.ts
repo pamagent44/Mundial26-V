@@ -251,7 +251,6 @@ export async function getAllPredictions(requestingUser?: string) {
       users (username),
       matches (*)
     `)
-    .range(0, 10000)
 
   if (error) throw new Error(error.message)
 
@@ -677,4 +676,86 @@ export async function createAdminManualPrediction(
 
   if (error) throw new Error(error.message)
   return data
+}
+
+/**
+ * SOLUCIÓN DEFINITIVA PARA LA MATRIZ: Obtiene los datos estructurados fase por fase, 
+ * realizando la búsqueda de predicciones usuario por usuario directamente en el servidor.
+ * Esto esquiva por completo el límite global de 1000 filas de Supabase (max_rows).
+ */
+export async function getMatrixDataByPhase(phase: string, requestingUser?: string) {
+  try {
+    // 1. Validar el rol del usuario que solicita la información
+    const { data: userData } = requestingUser ? await supabaseAdmin
+      .from('users')
+      .select('is_admin')
+      .eq('username', requestingUser)
+      .single() : { data: null }
+
+    const isAdmin = userData?.is_admin ?? false
+    const now = new Date()
+
+    // 2. Obtener la lista de usuarios participantes (excluyendo la cuenta admin)
+    const { data: allUsers, error: uErr } = await supabaseAdmin
+      .from('users')
+      .select('username, points')
+      .neq('username', 'admin')
+      .order('points', { ascending: false })
+
+    if (uErr) throw uErr
+
+    // 3. Obtener los partidos correspondientes a la fase seleccionada
+    const { data: allMatches, error: mErr } = await supabaseAdmin
+      .from('matches')
+      .select('*')
+      .eq('phase', phase)
+      .order('match_date', { ascending: true })
+
+    if (mErr) throw mErr
+
+    const matchIds = allMatches?.map(m => m.id) || []
+    
+    // 4. Construir la matriz fila por fila (Usuario por Usuario)
+    const matrixPredictions: Record<string, Record<string, any>> = {}
+
+    for (const user of (allUsers || [])) {
+      matrixPredictions[user.username] = {}
+      
+      if (matchIds.length === 0) continue
+
+      // Consulta indexada: Máximo 72 filas por tanda, Supabase jamás lo truncará
+      const { data: userPreds, error: pErr } = await supabaseAdmin
+        .from('predictions')
+        .select('*')
+        .eq('user_id', user.username)
+        .in('match_id', matchIds)
+
+      if (pErr) continue
+
+      userPreds?.forEach((pred: any) => {
+        const match = allMatches?.find(m => m.id === pred.match_id)
+        const deadline = match ? getMatchDeadline(match.match_date) : new Date()
+        
+        // Política de Privacidad: Visible si venció el contador, si eres admin o si es tu propia fila
+        const isVisible = now >= deadline || isAdmin || requestingUser === user.username
+
+        matrixPredictions[user.username][pred.match_id] = {
+          home_score: isVisible ? pred.home_score : -1,
+          away_score: isVisible ? pred.away_score : -1,
+          points: pred.points,
+          is_hidden: !isVisible
+        }
+      })
+    }
+
+    return {
+      success: true,
+      users: allUsers || [],
+      matches: allMatches || [],
+      matrix: matrixPredictions
+    }
+  } catch (error: any) {
+    console.error('Error construyendo matriz por usuarios:', error)
+    throw new Error('Error al empaquetar matriz: ' + error.message)
+  }
 }
