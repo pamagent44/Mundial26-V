@@ -46,6 +46,11 @@ export default function Navbar() {
               <Star className="w-4 h-4" />
               Ranking
             </Link>
+            {/* ✅ NUEVO: Botón de Resultados añadido al menú principal */}
+            <Link href="/resultados" className="text-white hover:text-accent transition-colors flex items-center gap-1">
+              <Users className="w-4 h-4" />
+              Resultados
+            </Link>
             <Link href="/reglas" className="text-white hover:text-accent transition-colors flex items-center gap-1">
               <Shield className="w-4 h-4" />
               Reglas
