@@ -607,3 +607,73 @@ function mapStatus(status: string): string {
   }
   return statusMap[status] || 'upcoming'
 }
+
+// Añadir al final de tu archivo src/app/actions.ts
+
+/**
+ * NUEVA ACCIÓN DE SERVIDOR: Permite al administrador insertar o editar predicciones de un usuario de forma manual,
+ * saltándose el bloqueo de tiempo del contador, pero validando que el partido no haya empezado todavía.
+ */
+export async function createAdminManualPrediction(
+  adminUsername: string,
+  targetUserId: string,
+  matchId: string,
+  homeScore: number,
+  awayScore: number
+) {
+  // 1. Validar que quien invoca la acción sea realmente administrador
+  const { data: adminUser } = await supabaseAdmin
+    .from('users')
+    .select('is_admin')
+    .eq('username', adminUsername)
+    .single()
+
+  if (!adminUser || !adminUser.is_admin) {
+    throw new Error('No autorizado. Solo los administradores pueden realizar esta acción.')
+  }
+
+  // 2. Validar que el partido no haya empezado o finalizado (status debe ser 'upcoming')
+  const { data: match } = await supabaseAdmin
+    .from('matches')
+    .select('status')
+    .eq('id', matchId)
+    .single()
+
+  if (!match) throw new Error('Partido no encontrado')
+  if (match.status !== 'upcoming') {
+    throw new Error('No se pueden modificar predicciones de partidos en juego o finalizados.')
+  }
+
+  // 3. Comprobar si ya existe un registro previo para actualizarlo o crear uno nuevo
+  const { data: existing } = await supabaseAdmin
+    .from('predictions')
+    .select('id')
+    .eq('user_id', targetUserId)
+    .eq('match_id', matchId)
+    .single()
+
+  if (existing) {
+    const { data, error } = await supabaseAdmin
+      .from('predictions')
+      .update({ home_score: homeScore, away_score: awayScore })
+      .eq('id', existing.id)
+      .select()
+
+    if (error) throw new Error(error.message)
+    return data
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('predictions')
+    .insert([{
+      user_id: targetUserId,
+      match_id: matchId,
+      home_score: homeScore,
+      away_score: awayScore,
+      points: 0
+    }])
+    .select()
+
+  if (error) throw new Error(error.message)
+  return data
+}
