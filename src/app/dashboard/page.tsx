@@ -45,11 +45,11 @@ const PHASES = [
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
-  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 }, // Orden cronológico correcto
+  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 }, 
   { key: 'final', label: 'Final', multiplier: 5 },
 ]
 
-// ✅ CORREGIDO: Rangos de fechas configurados a las 05:00 AM para el filtrado exacto en la pestaña de Predicciones
+// Rangos de fechas configurados a las 05:00 AM para el filtrado exacto en la pestaña de Predicciones
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   groups:        { start: new Date('2026-06-11T05:00:00Z'), end: new Date('2026-06-28T05:00:00Z') },
   Dieciseisavos: { start: new Date('2026-06-28T05:00:00Z'), end: new Date('2026-07-04T05:00:00Z') },
@@ -269,9 +269,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } fill: {
-      // Bloque vacío de fallback opcional
-    } finally {
+    } finally { // ✅ CORREGIDO: Sintaxis purgada y limpia de errores
       setLoading(false)
     }
   }
@@ -410,7 +408,7 @@ export default function DashboardPage() {
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
-      setSyncing(false) // ✅ CORREGIDO: Solucionado error sintáctico de Turbopack
+      setSyncing(false)
     }
   }
 
