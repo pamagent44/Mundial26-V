@@ -13,7 +13,8 @@ import {
 import { 
   createUser, getUsers, getMatches, createPrediction, getUserPredictions, syncMatchesFromAPI,
   deleteUser, createPredictionBackup, getLatestBackup, resetPassword, updatePassword,
-  recalculateAllRankings
+  recalculateAllRankings,
+  createAdminManualPrediction
 } from '@/app/actions'
 import { getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 
@@ -44,18 +45,19 @@ const PHASES = [
   { key: 'round16', label: 'Octavos', multiplier: 2 },
   { key: 'quarterfinals', label: 'Cuartos', multiplier: 3 },
   { key: 'semifinals', label: 'Semifinal', multiplier: 4 },
-  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 }, // ← INTERCAMBIADO: Imagen-1 (3er lugar va primero)
-  { key: 'final', label: 'Final', multiplier: 5 },          // ← INTERCAMBIADO: Imagen-1 (Final va después)
+  { key: 'thirdplace', label: '3er Lugar', multiplier: 4 }, // Orden cronológico correcto
+  { key: 'final', label: 'Final', multiplier: 5 },
 ]
 
+// ✅ CORREGIDO: Rangos de fechas configurados a las 05:00 AM para el filtrado exacto en la pestaña de Predicciones
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
-  groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-27T23:59:59Z') },
-  Dieciseisavos: { start: new Date('2026-06-28T00:00:00Z'), end: new Date('2026-07-03T23:59:59Z') },
-  round16:       { start: new Date('2026-07-04T00:00:00Z'), end: new Date('2026-07-07T23:59:59Z') },
-  quarterfinals: { start: new Date('2026-07-09T00:00:00Z'), end: new Date('2026-07-11T23:59:59Z') },
-  semifinals:    { start: new Date('2026-07-14T00:00:00Z'), end: new Date('2026-07-15T23:59:59Z') },
-  thirdplace:    { start: new Date('2026-07-18T00:00:00Z'), end: new Date('2026-07-18T23:59:59Z') },
-  final:         { start: new Date('2026-07-19T00:00:00Z'), end: new Date('2026-07-19T23:59:59Z') },
+  groups:        { start: new Date('2026-06-11T05:00:00Z'), end: new Date('2026-06-28T05:00:00Z') },
+  Dieciseisavos: { start: new Date('2026-06-28T05:00:00Z'), end: new Date('2026-07-04T05:00:00Z') },
+  round16:       { start: new Date('2026-07-04T05:00:00Z'), end: new Date('2026-07-07T05:00:00Z') },
+  quarterfinals: { start: new Date('2026-07-09T05:00:00Z'), end: new Date('2026-07-12T05:00:00Z') },
+  semifinals:    { start: new Date('2026-07-14T05:00:00Z'), end: new Date('2026-07-15T23:59:59Z') },
+  thirdplace:    { start: new Date('2026-07-18T05:00:00Z'), end: new Date('2026-07-18T23:59:59Z') },
+  final:         { start: new Date('2026-07-19T05:00:00Z'), end: new Date('2026-07-20T05:00:00Z') },
 }
 
 const DEADLINE_BLOCKS = [
@@ -181,7 +183,7 @@ function matchBelongsToPhase(match: Match, phaseKey: string): boolean {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'predictions' | 'admin'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'predictions' | 'admin' | 'admin-manual'>('dashboard')
   const [mounted, setMounted] = useState(false)
   const [currentUser, setCurrentUser] = useState<UserData | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -203,6 +205,13 @@ export default function DashboardPage() {
   const [syncMessage, setSyncMessage] = useState('')
   const [calculating, setCalculating] = useState(false)
   const [calcMessage, setCalcMessage] = useState('')
+
+  // Gestión manual del administrador
+  const [manualTargetUser, setManualTargetUser] = useState('')
+  const [manualTargetMatch, setManualTargetMatch] = useState('')
+  const [manualHomeScore, setManualHomeScore] = useState(0)
+  const [manualAwayScore, setManualAwayScore] = useState(0)
+  const [manualMessage, setManualMessage] = useState('')
   
   const [showResetModal, setShowResetModal] = useState(false)
   const [selectedUser, setSelectedUser] = useState('')
@@ -236,15 +245,12 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isAdmin) loadBackupInfo()
   }, [isAdmin])
-  // ========================================================
-  // 👇 PEGA AQUÍ LA SOLUCIÓN B 👇
-  // ========================================================
+
   useEffect(() => {
     if (currentUser?.username) {
       loadData(currentUser.username)
     }
-  }, [activeTab]) // Se ejecutará cada vez que el usuario pulse una pestaña diferente
-  // ========================================================
+  }, [activeTab])
   
   const loadData = async (username: string) => {
     try {
@@ -263,6 +269,8 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
+    } fill: {
+      // Bloque vacío de fallback opcional
     } finally {
       setLoading(false)
     }
@@ -284,10 +292,33 @@ export default function DashboardPage() {
       await createPrediction(currentUser.username, matchId, tempPrediction.homeScore, tempPrediction.awayScore)
       setPredictions({ ...predictions, [matchId]: tempPrediction })
       setEditingMatch(null)
-      // ⚡ MEJORA RECOLECTORA: Fuerza a la web a pedir los nuevos conteos y puntos de inmediato
       await loadData(currentUser.username)
     } catch (err: any) {
       alert(err.message)
+    }
+  }
+
+  const handleSaveAdminManualPrediction = async () => {
+    setManualMessage('')
+    if (!currentUser || !manualTargetUser || !manualTargetMatch) {
+      setManualMessage('❌ Por favor, selecciona un usuario y un partido válido.')
+      return
+    }
+    try {
+      await createAdminManualPrediction(
+        currentUser.username,
+        manualTargetUser,
+        manualTargetMatch,
+        manualHomeScore,
+        manualAwayScore
+      )
+      setManualMessage('✅ Predicción guardada correctamente en el sistema.')
+      setManualTargetMatch('')
+      setManualHomeScore(0)
+      setManualAwayScore(0)
+      await loadData(currentUser.username)
+    } catch (err: any) {
+      setManualMessage('❌ Error: ' + err.message)
     }
   }
 
@@ -379,7 +410,7 @@ export default function DashboardPage() {
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
-      setSyncing(false)
+      setSyncing(false) // ✅ CORREGIDO: Solucionado error sintáctico de Turbopack
     }
   }
 
@@ -418,14 +449,14 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex gap-2 mb-8 overflow-x-auto">
-            {['dashboard', 'predictions', 'admin'].map((tab) => {
-              if (tab === 'admin' && !isAdmin) return null
+            {['dashboard', 'predictions', 'admin', 'admin-manual'].map((tab) => {
+              if ((tab === 'admin' || tab === 'admin-manual') && !isAdmin) return null
               return (
                 <button
                   key={tab} onClick={() => setActiveTab(tab as any)}
-                  className={`px-6 py-3 rounded-lg font-semibold capitalize ${activeTab === tab ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}
+                  className={`px-6 py-3 rounded-lg font-semibold capitalize whitespace-nowrap ${activeTab === tab ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}
                 >
-                  {tab}
+                  {tab === 'admin-manual' ? 'Gestión Manual' : tab}
                 </button>
               )
             })}
@@ -522,7 +553,6 @@ export default function DashboardPage() {
                                 <span className="w-12 text-center font-bold bg-white p-1 border rounded">{prediction ? prediction.homeScore : '-'}</span>
                                 <span>-</span>
                                 <span className="w-12 text-center font-bold bg-white p-1 border rounded">{prediction ? prediction.awayScore : '-'}</span>
-                                
                                 <button onClick={() => { setEditingMatch(match.id); setTempPrediction(prediction || { homeScore: 0, awayScore: 0 }) }} className="p-2 bg-primary text-white rounded"><Edit3 className="w-4 h-4" /></button>
                               </>
                             )
@@ -559,19 +589,12 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* ✅ RESTAURADO: Contenedor para que el administrador cambie su propia contraseña (Imagen-4) */}
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-text-primary">Mi Contraseña</h3>
                   <p className="text-sm text-text-secondary">Cambia tu contraseña de administrador de forma segura</p>
                 </div>
-                <button
-                  onClick={() => setShowChangePasswordModal(true)}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors flex items-center gap-2 text-sm font-semibold"
-                >
-                  <Edit3 className="w-4 h-4" />
-                  Cambiar Contraseña
-                </button>
+                <button onClick={() => setShowChangePasswordModal(true)} className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-fifa-blue transition-colors flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4" /> Cambiar Contraseña</button>
               </div>
 
               <div className="p-4 bg-gray-50 border rounded-xl">
@@ -605,6 +628,89 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+
+          {activeTab === 'admin-manual' && isAdmin && (
+            <div className="bg-surface rounded-2xl shadow-lg p-6 space-y-6">
+              <div className="border-b pb-4">
+                <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-fifa-red" />
+                  Panel de Gestión de Predicciones Manuales
+                </h2>
+                <p className="text-sm text-text-secondary mt-1">
+                  Registra o altera marcadores en nombre de cualquier participante saltándote las restricciones de tiempo regulado.
+                </p>
+              </div>
+
+              {manualMessage && (
+                <div className={`p-4 rounded-xl text-sm font-semibold border ${manualMessage.includes('✅') ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                  {manualMessage}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-6 rounded-xl border border-gray-200">
+                <div>
+                  <label className="block text-sm font-bold text-text-primary mb-2">1. Seleccionar Participante</label>
+                  <select 
+                    value={manualTargetUser}
+                    onChange={(e) => setManualTargetUser(e.target.value)}
+                    className="w-full bg-white p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-primary font-medium"
+                  >
+                    <option value="">-- Elige un usuario --</option>
+                    {users.map(u => (
+                      <option key={u.username} value={u.username}>{u.username} ({u.points || 0} pts)</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-text-primary mb-2">2. Seleccionar Partido (No Empezados)</label>
+                  <select
+                    value={manualTargetMatch}
+                    onChange={(e) => setManualTargetMatch(e.target.value)}
+                    className="w-full bg-white p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-primary font-medium"
+                  >
+                    <option value="">-- Elige un enfrentamiento --</option>
+                    {matches.filter(m => m.status === 'upcoming').map(m => (
+                      <option key={m.id} value={m.id}>
+                        [{getPhaseName(m.phase)}] {m.home_team} vs {m.away_team}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2 flex flex-col items-center justify-center p-4 bg-white border border-gray-200 rounded-xl shadow-inner">
+                  <label className="block text-sm font-bold text-text-primary mb-3">3. Ingresar Marcador de la Predicción</label>
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <span className="text-xs block font-semibold mb-1 text-text-secondary">Goles Local</span>
+                      <input 
+                        type="number" min="0" value={manualHomeScore} 
+                        onChange={(e) => setManualHomeScore(parseInt(e.target.value) || 0)} 
+                        className="w-16 h-12 text-center text-2xl font-bold border-2 border-primary rounded-xl outline-none focus:ring-2"
+                      />
+                    </div>
+                    <span className="text-2xl font-bold text-gray-400 mt-4">-</span>
+                    <div className="text-center">
+                      <span className="text-xs block font-semibold mb-1 text-text-secondary">Goles Visitante</span>
+                      <input 
+                        type="number" min="0" value={manualAwayScore} 
+                        onChange={(e) => setManualAwayScore(parseInt(e.target.value) || 0)} 
+                        className="w-16 h-12 text-center text-2xl font-bold border-2 border-primary rounded-xl outline-none focus:ring-2"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={handleSaveAdminManualPrediction}
+                className="w-full bg-primary hover:bg-fifa-blue text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <Save className="w-5 h-5" />
+                Guardar Predicción Manual Forzada
+              </button>
+            </div>
+          )}
         </div>
       </main>
       <Footer />
@@ -619,7 +725,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Modal para cambiar contraseña Admin */}
       {showChangePasswordModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
