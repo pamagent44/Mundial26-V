@@ -46,7 +46,6 @@ export default function Navbar() {
               <Star className="w-4 h-4" />
               Ranking
             </Link>
-            {/* ✅ NUEVO: Botón de Resultados añadido al menú principal */}
             <Link href="/resultados" className="text-white hover:text-accent transition-colors flex items-center gap-1">
               <Users className="w-4 h-4" />
               Resultados
@@ -103,6 +102,10 @@ export default function Navbar() {
               </Link>
               <Link href="/ranking" className="text-white hover:text-accent transition-colors py-2" onClick={() => setIsMenuOpen(false)}>
                 Ranking
+              </Link>
+              {/* ✅ CORREGIDO: Añadido el enlace adaptativo para el menú desplegable móvil en vertical */}
+              <Link href="/resultados" className="text-white hover:text-accent transition-colors py-2" onClick={() => setIsMenuOpen(false)}>
+                Resultados
               </Link>
               <Link href="/reglas" className="text-white hover:text-accent transition-colors py-2" onClick={() => setIsMenuOpen(false)}>
                 Reglas
