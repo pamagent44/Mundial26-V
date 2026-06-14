@@ -85,7 +85,7 @@ export default function RankingPage() {
                     <p className="font-bold text-text-primary">{rankingData[1].username}</p>
                     <p className="text-2xl font-bold text-primary">{rankingData[1].points}</p>
                     <p className="text-sm text-text-secondary">puntos</p>
-                    <p className="text-xs text-accent font-medium">30% del bote</p>
+                    <p className="text-xs text-accent font-medium">25% del bote</p>
                   </div>
                 )}
 
@@ -100,7 +100,7 @@ export default function RankingPage() {
                     <p className="font-bold text-xl text-text-primary">{rankingData[0].username}</p>
                     <p className="text-3xl font-bold text-accent">{rankingData[0].points}</p>
                     <p className="text-sm text-text-secondary">puntos</p>
-                    <p className="text-xs text-accent font-medium">60% del bote</p>
+                    <p className="text-xs text-accent font-medium">40% del bote</p>
                   </div>
                 )}
 
@@ -114,7 +114,7 @@ export default function RankingPage() {
                     <p className="font-bold text-text-primary">{rankingData[2].username}</p>
                     <p className="text-2xl font-bold text-primary">{rankingData[2].points}</p>
                     <p className="text-sm text-text-secondary">puntos</p>
-                    <p className="text-xs text-accent font-medium">10% del bote</p>
+                    <p className="text-xs text-accent font-medium">15% del bote</p>
                   </div>
                 )}
               </div>
