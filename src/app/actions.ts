@@ -632,7 +632,7 @@ export async function createAdminManualPrediction(
     throw new Error('No autorizado. Solo los administradores pueden realizar esta acción.')
   }
 
-  // 2. Validar que el partido no haya empezado o finalizado (status debe ser 'upcoming')
+  // 2. Validar el partido
   const { data: match } = await supabaseAdmin
     .from('matches')
     .select('status')
@@ -640,8 +640,20 @@ export async function createAdminManualPrediction(
     .single()
 
   if (!match) throw new Error('Partido no encontrado')
+  
+  // ✅ MODIFICADO: Si el partido no está pendiente, validamos que esté entre los 3 últimos jugados
   if (match.status !== 'upcoming') {
-    throw new Error('No se pueden modificar predicciones de partidos en juego o finalizados.')
+    const { data: recentPlayed } = await supabaseAdmin
+      .from('matches')
+      .select('id')
+      .neq('status', 'upcoming')
+      .order('match_date', { ascending: false })
+      .limit(3)
+    
+    const isRecent = recentPlayed?.some(m => m.id === matchId)
+    if (!isRecent) {
+      throw new Error('Solo se pueden modificar partidos no empezados o los 3 últimos partidos ya jugados.')
+    }
   }
 
   // 3. Comprobar si ya existe un registro previo para actualizarlo o crear uno nuevo
@@ -653,31 +665,33 @@ export async function createAdminManualPrediction(
     .single()
 
   if (existing) {
-    const { data, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('predictions')
       .update({ home_score: homeScore, away_score: awayScore })
       .eq('id', existing.id)
-      .select()
 
     if (error) throw new Error(error.message)
-    return data
+  } else {
+    const { error } = await supabaseAdmin
+      .from('predictions')
+      .insert([{
+        user_id: targetUserId,
+        match_id: matchId,
+        home_score: homeScore,
+        away_score: awayScore,
+        points: 0
+      }])
+
+    if (error) throw new Error(error.message)
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('predictions')
-    .insert([{
-      user_id: targetUserId,
-      match_id: matchId,
-      home_score: homeScore,
-      away_score: awayScore,
-      points: 0
-    }])
-    .select()
+  // ✅ NUEVO: Si el partido ya se había jugado, recalculamos automáticamente los puntos de este usuario
+  if (match.status !== 'upcoming') {
+    await calculateUserPoints(targetUserId)
+  }
 
-  if (error) throw new Error(error.message)
-  return data
+  return { success: true }
 }
-
 /**
  * SOLUCIÓN DEFINITIVA PARA LA MATRIZ: Obtiene los datos estructurados fase por fase, 
  * realizando la búsqueda de predicciones usuario por usuario directamente en el servidor.
