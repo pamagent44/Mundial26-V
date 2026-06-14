@@ -398,6 +398,7 @@ export default function DashboardPage() {
     }
   }
 
+  // ✅ CORREGIDO AL 100%: Eliminada por completo la sintaxis inválida 'fill:' de este bloque asíncrono
   const handleSyncMatches = async () => {
     setSyncing(true)
     try {
@@ -407,13 +408,12 @@ export default function DashboardPage() {
       setMatches(matchesData || [])
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
-    } fill: {
-      // Bloque vacío redundante eliminado
     } finally {
       setSyncing(false)
     }
   }
 
+  // ✅ CORREGIDO AL 100%: Bloque purgado de forma homogénea libre de errores
   const handleRecalculateRankings = async () => {
     setCalculating(true)
     try {
@@ -423,7 +423,7 @@ export default function DashboardPage() {
       setUsers(usersData || [])
     } catch (err: any) {
       setCalcMessage('❌ ' + err.message)
-    } finally { // ✅ CORREGIDO: Eliminada la palabra clave huérfana "fill:" que causaba el error
+    } finally {
       setCalculating(false)
     }
   }
