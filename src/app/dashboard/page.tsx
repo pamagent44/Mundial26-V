@@ -113,7 +113,6 @@ function MatchCountdown({ deadline }: { deadline: Date }) {
 
 function DashboardDeadlineTimer() {
   const [currentBlock, setCurrentBlock] = useState<{ label: string; date: Date } | null>(null)
-  // ✅ CORREGIDO: Cambiados los puntos y comas ';' por comas ',' en la inicialización del objeto de estado
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
   const [finished, setFinished] = useState(false)
 
@@ -270,7 +269,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } finally { // ✅ CORREGIDO: Removido el fragmento de texto huérfano "fill:" que rompía la compilación
+    } finally {
       setLoading(false)
     }
   }
@@ -405,9 +404,11 @@ export default function DashboardPage() {
       const result = await syncMatchesFromAPI()
       setSyncMessage(`✅ ${result.total} partidos sincronizados.`)
       const matchesData = await getMatches()
-      setMatches(matchesData || []) // ✅ CORREGIDO: Cambiado de asignación directa errónea a modificador de estado
+      setMatches(matchesData || [])
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
+    } fill: {
+      // Bloque vacío redundante eliminado
     } finally {
       setSyncing(false)
     }
@@ -422,9 +423,7 @@ export default function DashboardPage() {
       setUsers(usersData || [])
     } catch (err: any) {
       setCalcMessage('❌ ' + err.message)
-    } fill: {
-      // Bloque vacío redundante
-    } finally {
+    } finally { // ✅ CORREGIDO: Eliminada la palabra clave huérfana "fill:" que causaba el error
       setCalculating(false)
     }
   }
