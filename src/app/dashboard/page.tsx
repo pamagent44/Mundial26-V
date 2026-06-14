@@ -49,15 +49,15 @@ const PHASES = [
   { key: 'final', label: 'Final', multiplier: 5 },
 ]
 
-// Rangos de fechas configurados a las 05:00 AM para el filtrado exacto en la pestaña de Predicciones
+// ✅ CONFIGURACIÓN SINCRONIZADA: Rangos horarios con corte a las 05:00 AM para el filtrado perfecto en la interfaz
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
-  groups:        { start: new Date('2026-06-11T05:00:00Z'), end: new Date('2026-06-28T05:00:00Z') },
+  groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-28T05:00:00Z') },
   Dieciseisavos: { start: new Date('2026-06-28T05:00:00Z'), end: new Date('2026-07-04T05:00:00Z') },
-  round16:       { start: new Date('2026-07-04T05:00:00Z'), end: new Date('2026-07-07T05:00:00Z') },
-  quarterfinals: { start: new Date('2026-07-09T05:00:00Z'), end: new Date('2026-07-12T05:00:00Z') },
-  semifinals:    { start: new Date('2026-07-14T05:00:00Z'), end: new Date('2026-07-15T23:59:59Z') },
-  thirdplace:    { start: new Date('2026-07-18T05:00:00Z'), end: new Date('2026-07-18T23:59:59Z') },
-  final:         { start: new Date('2026-07-19T05:00:00Z'), end: new Date('2026-07-20T05:00:00Z') },
+  round16:       { start: new Date('2026-07-04T05:00:00Z'), end: new Date('2026-07-08T05:00:00Z') },
+  quarterfinals: { start: new Date('2026-07-08T05:00:00Z'), end: new Date('2026-07-12T05:00:00Z') },
+  semifinals:    { start: new Date('2026-07-12T05:00:00Z'), end: new Date('2026-07-16T05:00:00Z') },
+  thirdplace:    { start: new Date('2026-07-16T05:00:00Z'), end: new Date('2026-07-18T23:59:59Z') },
+  final:         { start: new Date('2026-07-18T05:00:00Z'), end: new Date('2026-07-21T05:00:00Z') },
 }
 
 const DEADLINE_BLOCKS = [
@@ -113,7 +113,7 @@ function MatchCountdown({ deadline }: { deadline: Date }) {
 
 function DashboardDeadlineTimer() {
   const [currentBlock, setCurrentBlock] = useState<{ label: string; date: Date } | null>(null)
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+  const [timeLeft, setTimeLeft] = useState({ days: 0; hours: 0; minutes: 0; seconds: 0 })
   const [finished, setFinished] = useState(false)
 
   useEffect(() => {
@@ -269,7 +269,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } finally { // ✅ CORREGIDO: Sintaxis purgada y limpia de errores
+    } finally {
       setLoading(false)
     }
   }
@@ -404,7 +404,7 @@ export default function DashboardPage() {
       const result = await syncMatchesFromAPI()
       setSyncMessage(`✅ ${result.total} partidos sincronizados.`)
       const matchesData = await getMatches()
-      setMatches(matchesData || [])
+      setMatchesData = matchesData || []
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
@@ -677,7 +677,7 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="md:col-span-2 flex flex-col items-center justify-center p-4 bg-white border border-gray-200 rounded-xl shadow-inner">
-                  <label className="block text-sm font-bold text-text-primary mb-3">3. Ingresar Marcador de la Predicción</label>
+                  <label className="block text-sm font-bold text-text-primary mb-3">3. Período de Marcador de la Predicción</label>
                   <div className="flex items-center gap-4">
                     <div className="text-center">
                       <span className="text-xs block font-semibold mb-1 text-text-secondary">Goles Local</span>
