@@ -761,9 +761,8 @@ export async function getMatrixDataByPhase(phase: string, requestingUser?: strin
 }
 
 /**
- * SOLUCCIÓN INMUNE A LÍMITES: Obtiene la lista de usuarios con sus conteos exactos de 
- * predicciones y aciertos calculados directamente en el servidor mediante metadatos de conteo.
- * Esto evita descargar miles de registros y se salta el límite de 1000 filas de Supabase.
+ * SOLUCIÓN INMUNE A LÍMITES: Obtiene la lista de usuarios con sus conteos exactos de 
+ * predicciones y PLENOS COMPLETOS (11 puntos base) calculados directamente en el servidor.
  */
 export async function getRankingListWithStats() {
   try {
@@ -778,7 +777,7 @@ export async function getRankingListWithStats() {
 
     const rankingStats = []
 
-    // 2. Iterar usuario por usuario calculando los contadores mediante consultas 'head' ultra livianas
+    // 2. Iterar usuario por usuario calculando los contadores mediante consultas 'head' livianas
     for (const user of (users || [])) {
       
       // Contar predicciones totales realizadas
@@ -787,12 +786,12 @@ export async function getRankingListWithStats() {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.username)
 
-      // Contar aciertos exactos (predicciones que otorgaron más de 0 puntos)
+      // ✅ CORREGIDO: Cuenta como acierto ÚNICAMENTE si la puntuación es un pleno completo (11 puntos base x multiplicador)
       const { count: correctCount, error: acErr } = await supabaseAdmin
         .from('predictions')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.username)
-        .gt('points', 0)
+        .in('points', [11, 22, 33, 44, 55, 66])
 
       rankingStats.push({
         username: user.username,
