@@ -759,3 +759,53 @@ export async function getMatrixDataByPhase(phase: string, requestingUser?: strin
     throw new Error('Error al empaquetar matriz: ' + error.message)
   }
 }
+
+/**
+ * SOLUCCIÓN INMUNE A LÍMITES: Obtiene la lista de usuarios con sus conteos exactos de 
+ * predicciones y aciertos calculados directamente en el servidor mediante metadatos de conteo.
+ * Esto evita descargar miles de registros y se salta el límite de 1000 filas de Supabase.
+ */
+export async function getRankingListWithStats() {
+  try {
+    // 1. Obtener los usuarios ordenados por puntos (excluyendo la cuenta admin)
+    const { data: users, error: uErr } = await supabaseAdmin
+      .from('users')
+      .select('username, points, is_admin')
+      .neq('username', 'admin')
+      .order('points', { ascending: false })
+
+    if (uErr) throw uErr
+
+    const rankingStats = []
+
+    // 2. Iterar usuario por usuario calculando los contadores mediante consultas 'head' ultra livianas
+    for (const user of (users || [])) {
+      
+      // Contar predicciones totales realizadas
+      const { count: totalCount, error: cErr } = await supabaseAdmin
+        .from('predictions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.username)
+
+      // Contar aciertos exactos (predicciones que otorgaron más de 0 puntos)
+      const { count: correctCount, error: acErr } = await supabaseAdmin
+        .from('predictions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.username)
+        .gt('points', 0)
+
+      rankingStats.push({
+        username: user.username,
+        points: user.points || 0,
+        predictions: totalCount || 0,
+        correctPredictions: correctCount || 0,
+        isAdmin: user.is_admin
+      })
+    }
+
+    return { success: true, data: rankingStats }
+  } catch (error: any) {
+    console.error('Error en getRankingListWithStats:', error)
+    throw new Error('Error al obtener estadísticas del ranking: ' + error.message)
+  }
+}
