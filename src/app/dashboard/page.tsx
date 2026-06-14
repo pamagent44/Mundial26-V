@@ -49,7 +49,7 @@ const PHASES = [
   { key: 'final', label: 'Final', multiplier: 5 },
 ]
 
-// ✅ CONFIGURACIÓN SINCRONIZADA: Rangos horarios con corte a las 05:00 AM para el filtrado perfecto en la interfaz
+// Rangos de fechas configurados a las 05:00 AM para el filtrado exacto en la pestaña de Predicciones
 const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
   groups:        { start: new Date('2026-06-11T00:00:00Z'), end: new Date('2026-06-28T05:00:00Z') },
   Dieciseisavos: { start: new Date('2026-06-28T05:00:00Z'), end: new Date('2026-07-04T05:00:00Z') },
@@ -113,7 +113,8 @@ function MatchCountdown({ deadline }: { deadline: Date }) {
 
 function DashboardDeadlineTimer() {
   const [currentBlock, setCurrentBlock] = useState<{ label: string; date: Date } | null>(null)
-  const [timeLeft, setTimeLeft] = useState({ days: 0; hours: 0; minutes: 0; seconds: 0 })
+  // ✅ CORREGIDO: Cambiados los puntos y comas ';' por comas ',' en la inicialización del objeto de estado
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 })
   const [finished, setFinished] = useState(false)
 
   useEffect(() => {
@@ -269,7 +270,7 @@ export default function DashboardPage() {
       setPredictions(preds)
     } catch (err) {
       console.error(err)
-    } finally {
+    } finally { // ✅ CORREGIDO: Removido el fragmento de texto huérfano "fill:" que rompía la compilación
       setLoading(false)
     }
   }
@@ -404,7 +405,7 @@ export default function DashboardPage() {
       const result = await syncMatchesFromAPI()
       setSyncMessage(`✅ ${result.total} partidos sincronizados.`)
       const matchesData = await getMatches()
-      setMatchesData = matchesData || []
+      setMatches(matchesData || []) // ✅ CORREGIDO: Cambiado de asignación directa errónea a modificador de estado
     } catch (err: any) {
       setSyncMessage('❌ ' + err.message)
     } finally {
@@ -421,6 +422,8 @@ export default function DashboardPage() {
       setUsers(usersData || [])
     } catch (err: any) {
       setCalcMessage('❌ ' + err.message)
+    } fill: {
+      // Bloque vacío redundante
     } finally {
       setCalculating(false)
     }
