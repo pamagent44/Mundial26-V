@@ -662,21 +662,32 @@ export default function DashboardPage() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-bold text-text-primary mb-2">2. Seleccionar Partido (No Empezados)</label>
-                  <select
-                    value={manualTargetMatch}
-                    onChange={(e) => setManualTargetMatch(e.target.value)}
-                    className="w-full bg-white p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-primary font-medium"
-                  >
-                    <option value="">-- Elige un enfrentamiento --</option>
-                    {matches.filter(m => m.status === 'upcoming').map(m => (
-                      <option key={m.id} value={m.id}>
-                        [{getPhaseName(m.phase)}] {m.home_team} vs {m.away_team}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Selector de Partido Operativo */}
+<div>
+  <label className="block text-sm font-bold text-text-primary mb-2">2. Seleccionar Partido (Disponibles o 3 Últimos Jugados)</label>
+  <select
+    value={manualTargetMatch}
+    onChange={(e) => setManualTargetMatch(e.target.value)}
+    className="w-full bg-white p-3 border border-gray-300 rounded-xl outline-none focus:ring-2 focus:ring-primary font-medium"
+  >
+    <option value="">-- Elige un enfrentamiento --</option>
+    {(() => {
+      // Filtrar partidos pendientes
+      const upcoming = matches.filter(m => m.status === 'upcoming');
+      // Filtrar partidos ya iniciados o terminados
+      const played = matches.filter(m => m.status !== 'upcoming');
+      // Obtenemos los 3 últimos del grupo de jugados (los más recientes)
+      const last3Played = played.slice(-3);
+      
+      // Unimos ambos grupos para renderizarlos juntos en el menú desplegable
+      return [...upcoming, ...last3Played].map(m => (
+        <option key={m.id} value={m.id}>
+          [{getPhaseName(m.phase)}] {m.home_team} vs {m.away_team} {m.status !== 'upcoming' ? '(Ya Jugado)' : ''}
+        </option>
+      ));
+    })()}
+  </select>
+</div>
 
                 <div className="md:col-span-2 flex flex-col items-center justify-center p-4 bg-white border border-gray-200 rounded-xl shadow-inner">
                   <label className="block text-sm font-bold text-text-primary mb-3">3. Período de Marcador de la Predicción</label>
