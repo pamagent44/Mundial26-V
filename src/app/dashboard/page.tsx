@@ -63,9 +63,9 @@ const PHASE_DATE_RANGES: Record<string, { start: Date; end: Date }> = {
 const DEADLINE_BLOCKS = [
   { label: 'Fase de Grupos (Bloque 1)', date: new Date('2026-06-10T23:30:00Z') },
   { label: 'Fase de Grupos (Bloque 2)', date: new Date('2026-06-17T23:30:00Z') },
-  { label: 'Fase de Grupos (Bloque 3)', date: new Date('2026-06-23T23:30:00Z') },
-  { label: 'Dieciseisavos de Final', date: new Date('2026-06-28T15:30:00Z') },
-  { label: 'Octavos de Final', date: new Date('2026-07-04T15:30:00Z') },
+  { label: 'Fase de Grupos (Bloque 3)', date: new Date('2026-06-24T14:30:00Z') },
+  { label: 'Dieciseisavos de Final', date: new Date('2026-06-28T14:30:00Z') },
+  { label: 'Octavos de Final', date: new Date('2026-07-04T14:30:00Z') },
   { label: 'Cuartos de Final', date: new Date('2026-07-08T23:30:00Z') },
   { label: 'Semifinales', date: new Date('2026-07-13T23:30:00Z') },
   { label: 'Final y 3er Puesto', date: new Date('2026-07-17T23:30:00Z') },
