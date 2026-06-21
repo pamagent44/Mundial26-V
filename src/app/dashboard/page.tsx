@@ -169,7 +169,7 @@ function DashboardDeadlineTimer() {
         <div className="bg-white/20 p-2 rounded"><div>{String(timeLeft.seconds).padStart(2, '0')}</div><div className="text-xs font-normal">Seg</div></div>
       </div>
       <p className="text-[10px] text-white/60 mt-3">
-        Límite: {String(currentBlock.date.getUTCDate()).padStart(2, '0')}/{String(currentBlock.date.getUTCMonth() + 1).padStart(2, '0')}/{currentBlock.date.getUTCFullYear()} a las 23:30 (Hora UTC)
+        Límite: {String(currentBlock.date.getUTCDate()).padStart(2, '0')}/{String(currentBlock.date.getUTCMonth() + 1).padStart(2, '0')}/{currentBlock.date.getUTCFullYear()} a las 16:30 (Hora UTC)
       </p>
     </div>
   )
