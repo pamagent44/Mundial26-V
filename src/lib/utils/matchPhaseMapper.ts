@@ -80,15 +80,15 @@ export function getMatchDeadline(matchDateStr: string): Date {
   }
   // 3. Bloque 3 (Grupos): Partidos jugados hasta el 28/06/2026 a las 05:00 AM -> Cierre 23/06 a las 23:30
   if (matchDate <= new Date('2026-06-28T05:00:00Z')) {
-    return new Date('2026-06-24T15:30:00Z')
+    return new Date('2026-06-24T14:30:00Z')
   }
   // 4. Bloque 4 (Dieciseisavos): Partidos jugados hasta el 04/07/2026 a las 05:00 AM -> Cierre 27/06 a las 23:30
   if (matchDate <= new Date('2026-07-04T05:00:00Z')) {
-    return new Date('2026-06-28T15:30:00Z')
+    return new Date('2026-06-28T14:30:00Z')
   }
   // 5. Bloque 5 (Octavos): Partidos jugados hasta el 08/07/2026 a las 05:00 AM -> Cierre 03/07 a las 23:30
   if (matchDate <= new Date('2026-07-08T05:00:00Z')) {
-    return new Date('2026-07-04T15:30:00Z')
+    return new Date('2026-07-04T14:30:00Z')
   }
   // 6. Bloque 6 (Cuartos): Partidos jugados hasta el 12/07/2026 a las 05:00 AM -> Cierre 08/07 a las 23:30
   if (matchDate <= new Date('2026-07-12T05:00:00Z')) {
