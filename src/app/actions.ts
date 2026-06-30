@@ -1,9 +1,33 @@
 'use server'
 
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { fixMatchPhase, getMatchDeadline } from '@/lib/utils/matchPhaseMapper' // ← MODIFICADO
+import { fixMatchPhase, getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 
-// ==================== USUARIOS ====================
+// ==================== FUNCIONES AUXILIARES DE CONTROL ====================
+
+/**
+ * Filtra el marcador real devuelto por la API de fútbol eliminando los penaltis acumulados.
+ * Aísla de forma matemática exacta el resultado tras los 120 minutos de juego (Reglas oficiales).
+ */
+function getScoreExcludingPenalties(score: any) {
+  if (!score) return { home: null, away: null };
+  
+  let home = score.fullTime?.home;
+  let away = score.fullTime?.away;
+  
+  // Si la duración indica penaltis o el objeto penalties contiene datos válidos
+  if (score.duration === 'PENALTY_SHOOTOUT' || (score.penalties && score.penalties.home !== null && score.penalties.home !== undefined)) {
+    const penHome = score.penalties?.home || 0;
+    const penAway = score.penalties?.away || 0;
+    
+    if (home !== null && home !== undefined) home = home - penHome;
+    if (away !== null && away !== undefined) away = away - penAway;
+  }
+  
+  return { home, away };
+}
+
+// ==================== GESTIÓN DE PARTICIPANTES ====================
 
 export async function createUser(username: string, password: string, isAdmin = false) {
   if (!username || username.length < 3) {
@@ -117,7 +141,7 @@ export async function resetPassword(username: string, tempPassword: string) {
   return data
 }
 
-// ==================== PARTIDOS ====================
+// ==================== GESTIÓN DE ENCUENTROS ====================
 
 export async function getMatches() {
   const { data, error } = await supabaseAdmin
@@ -168,7 +192,7 @@ export async function updateMatchResult(matchId: string, homeScore: number, away
   return data
 }
 
-// ==================== PREDICCIONES ====================
+// ==================== SISTEMA DE PREDICCIONES REGULARES ====================
 
 export async function createPrediction(userId: string, matchId: string, homeScore: number, awayScore: number) {
   const { data: match } = await supabaseAdmin
@@ -221,14 +245,11 @@ export async function createPrediction(userId: string, matchId: string, homeScor
   return data
 }
 
-export async function getUserPredictions(userId: string) {
+export async function getUserPredictions(username: string) {
   const { data, error } = await supabaseAdmin
     .from('predictions')
-    .select(`
-      *,
-      matches ( home_team, away_team, home_score, away_score, phase, match_date, status )
-    `)
-    .eq('user_id', userId)
+    .select('*')
+    .eq('user_id', username)
 
   if (error) throw new Error(error.message)
   return data
@@ -308,7 +329,203 @@ export async function getVisiblePredictionsForPhase(requestingUser: string, phas
   return { data: processed, phaseVisible: true, revealDate: null }
 }
 
-// ==================== RANKING ====================
+// ==================== PANEL AVANZADO: GESTIÓN MANUAL DE ADMISTRACIÓN ====================
+
+/**
+ * ACCIÓN DE SERVIDOR AVANZADA: Permite al administrador registrar predicciones en nombre de terceros.
+ * Salta bloqueos temporales ordinarios. Admite partidos pendientes y los 3 últimos ya jugados con recálculo veloz.
+ */
+export async function createAdminManualPrediction(
+  adminUsername: string,
+  targetUserId: string,
+  matchId: string,
+  homeScore: number,
+  awayScore: number
+) {
+  const { data: adminUser } = await supabaseAdmin
+    .from('users')
+    .select('is_admin')
+    .eq('username', adminUsername)
+    .single()
+
+  if (!adminUser || !adminUser.is_admin) {
+    throw new Error('No autorizado. Solo los administradores pueden realizar esta acción.')
+  }
+
+  const { data: match } = await supabaseAdmin
+    .from('matches')
+    .select('status')
+    .eq('id', matchId)
+    .single()
+
+  if (!match) throw new Error('Partido no encontrado')
+  
+  if (match.status !== 'upcoming') {
+    const { data: recentPlayed } = await supabaseAdmin
+      .from('matches')
+      .select('id')
+      .neq('status', 'upcoming')
+      .order('match_date', { ascending: false })
+      .limit(3)
+    
+    const isRecent = recentPlayed?.some(m => m.id === matchId)
+    if (!isRecent) {
+      throw new Error('Solo se pueden modificar partidos no empezados o los 3 últimos partidos ya jugados.')
+    }
+  }
+
+  const { data: existing } = await supabaseAdmin
+    .from('predictions')
+    .select('id')
+    .eq('user_id', targetUserId)
+    .eq('match_id', matchId)
+    .single()
+
+  if (existing) {
+    const { error } = await supabaseAdmin
+      .from('predictions')
+      .update({ home_score: homeScore, away_score: awayScore })
+      .eq('id', existing.id)
+
+    if (error) throw new Error(error.message)
+  } else {
+    const { error } = await supabaseAdmin
+      .from('predictions')
+      .insert([{
+        user_id: targetUserId,
+        match_id: matchId,
+        home_score: homeScore,
+        away_score: awayScore,
+        points: 0
+      }])
+
+    if (error) throw new Error(error.message)
+  }
+
+  if (match.status !== 'upcoming') {
+    await calculateUserPoints(targetUserId)
+  }
+
+  return { success: true }
+}
+
+/**
+ * SERVIDOR OPTIMIZADO: Construye la matriz visual particionando las consultas por usuario.
+ * Esquiva por completo el límite de lectura global de 1000 filas impuesto por Supabase (max_rows).
+ */
+export async function getMatrixDataByPhase(phase: string, requestingUser?: string) {
+  try {
+    const { data: userData } = requestingUser ? await supabaseAdmin
+      .from('users')
+      .select('is_admin')
+      .eq('username', requestingUser)
+      .single() : { data: null }
+
+    const isAdmin = userData?.is_admin ?? false
+    const now = new Date()
+
+    const { data: allUsers, error: uErr } = await supabaseAdmin
+      .from('users')
+      .select('username, points')
+      .neq('username', 'admin')
+      .order('points', { ascending: false })
+
+    if (uErr) throw uErr
+
+    const { data: allMatches, error: mErr } = await supabaseAdmin
+      .from('matches')
+      .select('*')
+      .eq('phase', phase)
+      .order('match_date', { ascending: true })
+
+    if (mErr) throw mErr
+
+    const matchIds = allMatches?.map(m => m.id) || []
+    const matrixPredictions: Record<string, Record<string, any>> = {}
+
+    for (const user of (allUsers || [])) {
+      matrixPredictions[user.username] = {}
+      if (matchIds.length === 0) continue
+
+      const { data: userPreds, error: pErr } = await supabaseAdmin
+        .from('predictions')
+        .select('*')
+        .eq('user_id', user.username)
+        .in('match_id', matchIds)
+
+      if (pErr) continue
+
+      userPreds?.forEach((pred: any) => {
+        const match = allMatches?.find(m => m.id === pred.match_id)
+        const deadline = match ? getMatchDeadline(match.match_date) : new Date()
+        const isVisible = now >= deadline || isAdmin || requestingUser === user.username
+
+        matrixPredictions[user.username][pred.match_id] = {
+          home_score: isVisible ? pred.home_score : -1,
+          away_score: isVisible ? pred.away_score : -1,
+          points: pred.points,
+          is_hidden: !isVisible
+        }
+      })
+    }
+
+    return {
+      success: true,
+      users: allUsers || [],
+      matches: allMatches || [],
+      matrix: matrixPredictions
+    }
+  } catch (error: any) {
+    console.error('Error construyendo matriz por usuarios:', error)
+    throw new Error('Error al empaquetar matriz: ' + error.message)
+  }
+}
+
+// ==================== PROCESAMIENTO Y RANKING DE CLASIFICACIÓN ====================
+
+/**
+ * CONTEOS INDEXADOS: Obtiene la lista del ranking y calcula contadores exactos mediante metadatos 'head'.
+ * Cuenta como aciertos ÚNICAMENTE los plenos perfectos de 11 puntos base multiplied. Inmune al límite de 1000.
+ */
+export async function getRankingListWithStats() {
+  try {
+    const { data: users, error: uErr } = await supabaseAdmin
+      .from('users')
+      .select('username, points, is_admin')
+      .neq('username', 'admin')
+      .order('points', { ascending: false })
+
+    if (uErr) throw uErr
+
+    const rankingStats = []
+
+    for (const user of (users || [])) {
+      const { count: totalCount } = await supabaseAdmin
+        .from('predictions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.username)
+
+      const { count: correctCount } = await supabaseAdmin
+        .from('predictions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.username)
+        .in('points', [11, 22, 33, 44, 55, 66])
+
+      rankingStats.push({
+        username: user.username,
+        points: user.points || 0,
+        predictions: totalCount || 0,
+        correctPredictions: correctCount || 0,
+        isAdmin: user.is_admin
+      })
+    }
+
+    return { success: true, data: rankingStats }
+  } catch (error: any) {
+    console.error('Error en getRankingListWithStats:', error)
+    throw new Error('Error al obtener estadísticas del ranking: ' + error.message)
+  }
+}
 
 export async function getRankings() {
   const { data, error } = await supabaseAdmin
@@ -407,7 +624,7 @@ export async function calculateUserPoints(userId: string) {
   return totalPoints
 }
 
-// ==================== SINCRO & BACKUPS ====================
+// ==================== SINCRO API EXTRÍNSECA & BACKUPS ====================
 
 export async function syncMatchesFromAPI() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
@@ -425,14 +642,18 @@ export async function syncMatchesFromAPI() {
 
     for (const match of matches) {
       const correctedPhase = mapPhaseWithCorrection(match)
+      
+      // 🎯 Filtramos el marcador eliminando de raíz los penaltis inflados
+      const scores = getScoreExcludingPenalties(match.score)
+
       const matchData = {
         home_team: match.homeTeam?.name || 'Por definir',
         away_team: match.awayTeam?.name || 'Por definir',
         match_date: match.utcDate,
         phase: correctedPhase,
         group_name: match.group?.replace('GROUP_', '') || null,
-        home_score: match.score?.fullTime?.home,
-        away_score: match.score?.fullTime?.away,
+        home_score: scores.home, 
+        away_score: scores.away, 
         status: mapStatus(match.status)
       }
 
@@ -474,8 +695,11 @@ export async function updateLiveScores() {
     const matches = data.matches || []
 
     for (const match of matches) {
-      const homeScore = match.score?.fullTime?.home
-      const awayScore = match.score?.fullTime?.away
+      // 🎯 Interceptamos marcadores LIVE/FINISHED purgando los penaltis
+      const scores = getScoreExcludingPenalties(match.score)
+      const homeScore = scores.home
+      const awayScore = scores.away
+
       if (homeScore !== null && awayScore !== null) {
         await supabaseAdmin
           .from('matches')
@@ -606,219 +830,4 @@ function mapStatus(status: string): string {
     'PAUSED': 'live', 'FINISHED': 'finished', 'POSTPONED': 'upcoming'
   }
   return statusMap[status] || 'upcoming'
-}
-
-// Añadir al final de tu archivo src/app/actions.ts
-
-/**
- * NUEVA ACCIÓN DE SERVIDOR: Permite al administrador insertar o editar predicciones de un usuario de forma manual,
- * saltándose el bloqueo de tiempo del contador, pero validando que el partido no haya empezado todavía.
- */
-export async function createAdminManualPrediction(
-  adminUsername: string,
-  targetUserId: string,
-  matchId: string,
-  homeScore: number,
-  awayScore: number
-) {
-  // 1. Validar que quien invoca la acción sea realmente administrador
-  const { data: adminUser } = await supabaseAdmin
-    .from('users')
-    .select('is_admin')
-    .eq('username', adminUsername)
-    .single()
-
-  if (!adminUser || !adminUser.is_admin) {
-    throw new Error('No autorizado. Solo los administradores pueden realizar esta acción.')
-  }
-
-  // 2. Validar el partido
-  const { data: match } = await supabaseAdmin
-    .from('matches')
-    .select('status')
-    .eq('id', matchId)
-    .single()
-
-  if (!match) throw new Error('Partido no encontrado')
-  
-  // ✅ MODIFICADO: Si el partido no está pendiente, validamos que esté entre los 3 últimos jugados
-  if (match.status !== 'upcoming') {
-    const { data: recentPlayed } = await supabaseAdmin
-      .from('matches')
-      .select('id')
-      .neq('status', 'upcoming')
-      .order('match_date', { ascending: false })
-      .limit(3)
-    
-    const isRecent = recentPlayed?.some(m => m.id === matchId)
-    if (!isRecent) {
-      throw new Error('Solo se pueden modificar partidos no empezados o los 3 últimos partidos ya jugados.')
-    }
-  }
-
-  // 3. Comprobar si ya existe un registro previo para actualizarlo o crear uno nuevo
-  const { data: existing } = await supabaseAdmin
-    .from('predictions')
-    .select('id')
-    .eq('user_id', targetUserId)
-    .eq('match_id', matchId)
-    .single()
-
-  if (existing) {
-    const { error } = await supabaseAdmin
-      .from('predictions')
-      .update({ home_score: homeScore, away_score: awayScore })
-      .eq('id', existing.id)
-
-    if (error) throw new Error(error.message)
-  } else {
-    const { error } = await supabaseAdmin
-      .from('predictions')
-      .insert([{
-        user_id: targetUserId,
-        match_id: matchId,
-        home_score: homeScore,
-        away_score: awayScore,
-        points: 0
-      }])
-
-    if (error) throw new Error(error.message)
-  }
-
-  // ✅ NUEVO: Si el partido ya se había jugado, recalculamos automáticamente los puntos de este usuario
-  if (match.status !== 'upcoming') {
-    await calculateUserPoints(targetUserId)
-  }
-
-  return { success: true }
-}
-/**
- * SOLUCIÓN DEFINITIVA PARA LA MATRIZ: Obtiene los datos estructurados fase por fase, 
- * realizando la búsqueda de predicciones usuario por usuario directamente en el servidor.
- * Esto esquiva por completo el límite global de 1000 filas de Supabase (max_rows).
- */
-export async function getMatrixDataByPhase(phase: string, requestingUser?: string) {
-  try {
-    // 1. Validar el rol del usuario que solicita la información
-    const { data: userData } = requestingUser ? await supabaseAdmin
-      .from('users')
-      .select('is_admin')
-      .eq('username', requestingUser)
-      .single() : { data: null }
-
-    const isAdmin = userData?.is_admin ?? false
-    const now = new Date()
-
-    // 2. Obtener la lista de usuarios participantes (excluyendo la cuenta admin)
-    const { data: allUsers, error: uErr } = await supabaseAdmin
-      .from('users')
-      .select('username, points')
-      .neq('username', 'admin')
-      .order('points', { ascending: false })
-
-    if (uErr) throw uErr
-
-    // 3. Obtener los partidos correspondientes a la fase seleccionada
-    const { data: allMatches, error: mErr } = await supabaseAdmin
-      .from('matches')
-      .select('*')
-      .eq('phase', phase)
-      .order('match_date', { ascending: true })
-
-    if (mErr) throw mErr
-
-    const matchIds = allMatches?.map(m => m.id) || []
-    
-    // 4. Construir la matriz fila por fila (Usuario por Usuario)
-    const matrixPredictions: Record<string, Record<string, any>> = {}
-
-    for (const user of (allUsers || [])) {
-      matrixPredictions[user.username] = {}
-      
-      if (matchIds.length === 0) continue
-
-      // Consulta indexada: Máximo 72 filas por tanda, Supabase jamás lo truncará
-      const { data: userPreds, error: pErr } = await supabaseAdmin
-        .from('predictions')
-        .select('*')
-        .eq('user_id', user.username)
-        .in('match_id', matchIds)
-
-      if (pErr) continue
-
-      userPreds?.forEach((pred: any) => {
-        const match = allMatches?.find(m => m.id === pred.match_id)
-        const deadline = match ? getMatchDeadline(match.match_date) : new Date()
-        
-        // Política de Privacidad: Visible si venció el contador, si eres admin o si es tu propia fila
-        const isVisible = now >= deadline || isAdmin || requestingUser === user.username
-
-        matrixPredictions[user.username][pred.match_id] = {
-          home_score: isVisible ? pred.home_score : -1,
-          away_score: isVisible ? pred.away_score : -1,
-          points: pred.points,
-          is_hidden: !isVisible
-        }
-      })
-    }
-
-    return {
-      success: true,
-      users: allUsers || [],
-      matches: allMatches || [],
-      matrix: matrixPredictions
-    }
-  } catch (error: any) {
-    console.error('Error construyendo matriz por usuarios:', error)
-    throw new Error('Error al empaquetar matriz: ' + error.message)
-  }
-}
-
-/**
- * SOLUCIÓN INMUNE A LÍMITES: Obtiene la lista de usuarios con sus conteos exactos de 
- * predicciones y PLENOS COMPLETOS (11 puntos base) calculados directamente en el servidor.
- */
-export async function getRankingListWithStats() {
-  try {
-    // 1. Obtener los usuarios ordenados por puntos (excluyendo la cuenta admin)
-    const { data: users, error: uErr } = await supabaseAdmin
-      .from('users')
-      .select('username, points, is_admin')
-      .neq('username', 'admin')
-      .order('points', { ascending: false })
-
-    if (uErr) throw uErr
-
-    const rankingStats = []
-
-    // 2. Iterar usuario por usuario calculando los contadores mediante consultas 'head' livianas
-    for (const user of (users || [])) {
-      
-      // Contar predicciones totales realizadas
-      const { count: totalCount, error: cErr } = await supabaseAdmin
-        .from('predictions')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.username)
-
-      // ✅ CORREGIDO: Cuenta como acierto ÚNICAMENTE si la puntuación es un pleno completo (11 puntos base x multiplicador)
-      const { count: correctCount, error: acErr } = await supabaseAdmin
-        .from('predictions')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.username)
-        .in('points', [11, 22, 33, 44, 55, 66])
-
-      rankingStats.push({
-        username: user.username,
-        points: user.points || 0,
-        predictions: totalCount || 0,
-        correctPredictions: correctCount || 0,
-        isAdmin: user.is_admin
-      })
-    }
-
-    return { success: true, data: rankingStats }
-  } catch (error: any) {
-    console.error('Error en getRankingListWithStats:', error)
-    throw new Error('Error al obtener estadísticas del ranking: ' + error.message)
-  }
 }
