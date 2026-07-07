@@ -112,7 +112,7 @@ npm run preview
 
 ### Credenciales Admin
 - Usuario: `admin`
-- Contraseña: `admin123`
+- Contraseña: `xxxx`
 
 ## Autor
 Desarrollado con Next.js 14 y Supabase
