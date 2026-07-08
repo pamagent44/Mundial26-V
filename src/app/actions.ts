@@ -6,30 +6,36 @@ import { fixMatchPhase, getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 // ==================== FUNCIONES AUXILIARES DE CONTROL DE API ====================
 
 /**
- * MÁXIMA SEGURIDAD: Filtra el marcador devuelto por la API de fútbol eliminando los penaltis.
- * Incorpora un detector de consistencia: si fullTime ya es un empate, lo mantiene intacto.
- * Si es desigual, resta los penaltis para aislar el resultado real de los 120 minutos.
+ * BLINDAJE ABSOLUTO CONTRA PENALTIS: Calcula el resultado oficial sumando de forma aislada
+ * el tiempo regular (90 min) más la prórroga (30 min). Ignora por completo las inconsistencias
+ * del nodo 'fullTime' y la tanda de penaltis.
  */
 function getScoreExcludingPenalties(score: any) {
   if (!score) return { home: null, away: null };
   
-  let home = score.fullTime?.home;
-  let away = score.fullTime?.away;
-  
-  // Si el partido llegó a la tanda de penaltis por prórroga armada
-  if (score.duration === 'PENALTY_SHOOTOUT' || (score.penalties && score.penalties.home !== null && score.penalties.home !== undefined)) {
-    if (home !== null && home !== undefined && away !== null && away !== undefined) {
-      // REGLA DE ORO: Si ya son iguales (ej: 1-1), la API ya lo limpió. Si son diferentes (ej: 4-5), viene inflado y restamos.
-      if (home !== away) {
-        const penHome = score.penalties?.home || 0;
-        const penAway = score.penalties?.away || 0;
-        home = home - penHome;
-        away = away - penAway;
-      }
-    }
+  // Si el partido está pendiente o no se ha cargado ningún marcador, devolvemos nulo
+  if (score.fullTime?.home === null || score.fullTime?.home === undefined) {
+    return { home: null, away: null };
+  }
+
+  // Si la API provee el desglose oficial por períodos (Partidos de Eliminatorias)
+  if (score.regularTime && score.regularTime.home !== null && score.regularTime.home !== undefined) {
+    const regHome = score.regularTime.home || 0;
+    const regAway = score.regularTime.away || 0;
+    const extHome = score.extraTime?.home || 0;
+    const extAway = score.extraTime?.away || 0;
+    
+    return {
+      home: regHome + extHome,
+      away: regAway + extAway
+    };
   }
   
-  return { home, away };
+  // Fallback de seguridad para la Fase de Grupos regular
+  return {
+    home: score.fullTime.home,
+    away: score.fullTime.away
+  };
 }
 
 // ==================== GESTIÓN DE PARTICIPANTES ====================
@@ -636,7 +642,7 @@ export async function syncMatchesFromAPI() {
     for (const match of matches) {
       const correctedPhase = mapPhaseWithCorrection(match)
       
-      // 🎯 NUEVO INTEGRADO: Limpiamos los penaltis usando la regla inteligente
+      // 🎯 NUEVO FILTRADO INDESTRUCTIBLE: Suma períodos en lugar de restar fullTime
       const scores = getScoreExcludingPenalties(match.score)
 
       const matchData = {
@@ -688,7 +694,7 @@ export async function updateLiveScores() {
     const matches = data.matches || []
 
     for (const match of matches) {
-      // 🎯 NUEVO INTEGRADO: Limpiamos marcadores live de penaltis para evitar roturas temporales
+      // 🎯 NUEVO FILTRADO INDESTRUCTIBLE: Suma períodos en lugar de restar fullTime
       const scores = getScoreExcludingPenalties(match.score)
       const homeScore = scores.home
       const awayScore = scores.away
