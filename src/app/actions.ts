@@ -3,11 +3,12 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { fixMatchPhase, getMatchDeadline } from '@/lib/utils/matchPhaseMapper'
 
-// ==================== FUNCIONES AUXILIARES DE CONTROL ====================
+// ==================== FUNCIONES AUXILIARES DE CONTROL DE API ====================
 
 /**
- * Filtra el marcador real devuelto por la API de fútbol eliminando los penaltis acumulados.
- * Aísla de forma matemática exacta el resultado tras los 120 minutos de juego (Reglas oficiales).
+ * MÁXIMA SEGURIDAD: Filtra el marcador devuelto por la API de fútbol eliminando los penaltis.
+ * Incorpora un detector de consistencia: si fullTime ya es un empate, lo mantiene intacto.
+ * Si es desigual, resta los penaltis para aislar el resultado real de los 120 minutos.
  */
 function getScoreExcludingPenalties(score: any) {
   if (!score) return { home: null, away: null };
@@ -15,13 +16,17 @@ function getScoreExcludingPenalties(score: any) {
   let home = score.fullTime?.home;
   let away = score.fullTime?.away;
   
-  // Si la duración indica penaltis o el objeto penalties contiene datos válidos
+  // Si el partido llegó a la tanda de penaltis por prórroga armada
   if (score.duration === 'PENALTY_SHOOTOUT' || (score.penalties && score.penalties.home !== null && score.penalties.home !== undefined)) {
-    const penHome = score.penalties?.home || 0;
-    const penAway = score.penalties?.away || 0;
-    
-    if (home !== null && home !== undefined) home = home - penHome;
-    if (away !== null && away !== undefined) away = away - penAway;
+    if (home !== null && home !== undefined && away !== null && away !== undefined) {
+      // REGLA DE ORO: Si ya son iguales (ej: 1-1), la API ya lo limpió. Si son diferentes (ej: 4-5), viene inflado y restamos.
+      if (home !== away) {
+        const penHome = score.penalties?.home || 0;
+        const penAway = score.penalties?.away || 0;
+        home = home - penHome;
+        away = away - penAway;
+      }
+    }
   }
   
   return { home, away };
@@ -329,12 +334,8 @@ export async function getVisiblePredictionsForPhase(requestingUser: string, phas
   return { data: processed, phaseVisible: true, revealDate: null }
 }
 
-// ==================== PANEL AVANZADO: GESTIÓN MANUAL DE ADMISTRACIÓN ====================
+// ==================== PANEL AVANZADO: GESTIÓN MANUAL DE ADMINISTRACIÓN ====================
 
-/**
- * ACCIÓN DE SERVIDOR AVANZADA: Permite al administrador registrar predicciones en nombre de terceros.
- * Salta bloqueos temporales ordinarios. Admite partidos pendientes y los 3 últimos ya jugados con recálculo veloz.
- */
 export async function createAdminManualPrediction(
   adminUsername: string,
   targetUserId: string,
@@ -409,10 +410,6 @@ export async function createAdminManualPrediction(
   return { success: true }
 }
 
-/**
- * SERVIDOR OPTIMIZADO: Construye la matriz visual particionando las consultas por usuario.
- * Esquiva por completo el límite de lectura global de 1000 filas impuesto por Supabase (max_rows).
- */
 export async function getMatrixDataByPhase(phase: string, requestingUser?: string) {
   try {
     const { data: userData } = requestingUser ? await supabaseAdmin
@@ -483,10 +480,6 @@ export async function getMatrixDataByPhase(phase: string, requestingUser?: strin
 
 // ==================== PROCESAMIENTO Y RANKING DE CLASIFICACIÓN ====================
 
-/**
- * CONTEOS INDEXADOS: Obtiene la lista del ranking y calcula contadores exactos mediante metadatos 'head'.
- * Cuenta como aciertos ÚNICAMENTE los plenos perfectos de 11 puntos base multiplied. Inmune al límite de 1000.
- */
 export async function getRankingListWithStats() {
   try {
     const { data: users, error: uErr } = await supabaseAdmin
@@ -624,7 +617,7 @@ export async function calculateUserPoints(userId: string) {
   return totalPoints
 }
 
-// ==================== SINCRO API EXTRÍNSECA & BACKUPS ====================
+// ==================== SINCRO API AUTOMÁTICA Y BACKUPS ====================
 
 export async function syncMatchesFromAPI() {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY
@@ -643,7 +636,7 @@ export async function syncMatchesFromAPI() {
     for (const match of matches) {
       const correctedPhase = mapPhaseWithCorrection(match)
       
-      // 🎯 Filtramos el marcador eliminando de raíz los penaltis inflados
+      // 🎯 NUEVO INTEGRADO: Limpiamos los penaltis usando la regla inteligente
       const scores = getScoreExcludingPenalties(match.score)
 
       const matchData = {
@@ -695,7 +688,7 @@ export async function updateLiveScores() {
     const matches = data.matches || []
 
     for (const match of matches) {
-      // 🎯 Interceptamos marcadores LIVE/FINISHED purgando los penaltis
+      // 🎯 NUEVO INTEGRADO: Limpiamos marcadores live de penaltis para evitar roturas temporales
       const scores = getScoreExcludingPenalties(match.score)
       const homeScore = scores.home
       const awayScore = scores.away
